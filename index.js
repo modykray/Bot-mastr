@@ -14,7 +14,6 @@ const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
-const express = require('express');
 
 const entertainment   = require('./commands/entertainment');
 const admin           = require('./commands/admin');
@@ -24,7 +23,7 @@ const system          = require('./commands/system');
 const extras          = require('./commands/extras');
 const { randomEmoji } = require('./utils');
 
-const OWNER_NUMBER = '201110302392';  // ✅ تم التحديث
+const OWNER_NUMBER = '201227812859';
 const AUTH_FOLDER  = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const MAX_SUB_BOTS = 4;
@@ -49,8 +48,8 @@ console.log = (...args) => {
 };
 
 // ─── حالة البوت ───────────────────────────────────────────────────────────
-let botEnabled      = true;
-let currentMainSock = null;
+let botEnabled      = true;   // false = إيقاف مؤقت
+let currentMainSock = null;   // مرجع للسوكيت الحالي (للـ refresh)
 let pairingRequested = false;
 
 // ─── Sub-bot sessions ─────────────────────────────────────────────────────
@@ -82,31 +81,12 @@ async function handleMessage(sock, msg, isSubBot = false) {
 
     // ── ردود الكلمات التلقائية ────────────────────────────────────────────
     if (body && !body.startsWith('.') && !msg.key.fromMe) {
+      // تطبيع الحروف: توحيد كل أشكال الألف والهمزة
       const norm  = body.replace(/[أإآ]/g, 'ا').trim();
       const words = norm.split(/\s+/);
       const pick  = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-      // 🆕 احا — يبعت صوت aha.m4a
-      if (norm.includes('احا')) {
-        await sock.sendMessage(from, {
-          audio: { url: './assets/aha.m4a' },
-          mimetype: 'audio/mp4',
-          ptt: true
-        }, { quoted: msg });
-        return;
-      }
-
-      // 🆕 اصحي — يبعت صوت ashahi.m4a
-      if (norm.includes('اصحي')) {
-        await sock.sendMessage(from, {
-          audio: { url: './assets/ashahi.m4a' },
-          mimetype: 'audio/mp4',
-          ptt: true
-        }, { quoted: msg });
-        return;
-      }
-
-      // خخخ — خخ أو أكتر
+      // خخخ — خخ أو أكتر (حرف خ مكرر مرتين فأكتر)
       if (norm.includes('خخ')) {
         await sock.sendMessage(from, {
           text: `خوخ وفاكهة سوق العبور اشخر ع قدك يعرص🐦`,
@@ -114,10 +94,18 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
-      // وه — الكلمة لوحدها أو في جملة
+      // وه — الكلمة لوحدها أو في جملة (بدون تطبيع لأن وه ما فيهاش همزة)
       if (words.includes('وه')) {
         await sock.sendMessage(from, {
           text: pick([`صدمة مش كده😂🎀`, `حياتي بقت احسن بكتير😂🌚`]),
+        }, { quoted: msg });
+        return;
+      }
+
+      // احا / أحا — بعد التطبيع بتبقى احا دايماً
+      if (norm.includes('احا')) {
+        await sock.sendMessage(from, {
+          text: pick([`اقلع وشلحها🐦`, `خليني ارقعها🐦`]),
         }, { quoted: msg });
         return;
       }
@@ -185,6 +173,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
       case '.سمكة':    await voices.playAudio(ctx, 'samaka.mp3');        break;
       case '.بورعي':   await voices.playAudio(ctx, 'bora3i.mp3');        break;
       case '.ايرن':    await voices.playAudio(ctx, 'eren.mp3');          break;
+      case '.اصحي':    await voices.playAudio(ctx, 'as7a.mp3');          break;
 
       // ══ نظام ═════════════════════════════════════════════════════════════
       case '.قائمة':   await system.helpMenu(ctx);                       break;
@@ -203,6 +192,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
         await sock.sendMessage(from, {
           text: `🔄 *جاري إعادة الاتصال...*\nثواني وهيرجع يشتغل ✅`,
         }, { quoted: msg });
+        // أغلق السوكيت الحالي → سيُشغَّل startBot تلقائياً
         setTimeout(() => {
           try { currentMainSock?.end(new Error('manual_refresh')); } catch {}
         }, 1500);
@@ -444,6 +434,7 @@ async function startBot() {
       pairingRequested = false;
       botEnabled = true;
       console.log(`✅ البوت متصل! +${sock.user?.id?.split(':')[0]}`);
+      // تحميل البوتات الفرعية مرة واحدة فقط عند أول اتصال
       if (subBotSockets.size === 0) await loadSubBots();
     }
 
@@ -472,122 +463,12 @@ async function startBot() {
   });
 }
 
-// ─── إعداد سيرفر Express ──────────────────────────────────────────────────
-const app = express();
-const port = process.env.PORT || 4000;
-
-// صفحة رئيسية تعرض حالة البوت
-app.get('/', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html dir="rtl">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>🤖 ايرن بوت</title>
-      <style>
-        body {
-          font-family: 'Arial', sans-serif;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          min-height: 100vh;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          margin: 0;
-          padding: 20px;
-        }
-        .card {
-          background: white;
-          border-radius: 20px;
-          padding: 40px;
-          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-          max-width: 500px;
-          width: 100%;
-          text-align: center;
-        }
-        .emoji { font-size: 60px; margin-bottom: 10px; }
-        h1 { color: #333; margin: 10px 0; }
-        .status {
-          background: #4CAF50;
-          color: white;
-          padding: 10px 20px;
-          border-radius: 50px;
-          display: inline-block;
-          margin: 10px 0;
-        }
-        .info {
-          text-align: right;
-          background: #f5f5f5;
-          padding: 15px;
-          border-radius: 10px;
-          margin: 20px 0;
-        }
-        .info p { margin: 8px 0; color: #555; }
-        .footer { color: #999; font-size: 12px; margin-top: 20px; }
-      </style>
-    </head>
-    <body>
-      <div class="card">
-        <div class="emoji">🤖</div>
-        <h1>ايرن بوت</h1>
-        <div class="status">✅ البوت شغال</div>
-        <div class="info">
-          <p>📱 <strong>الأونر:</strong> ${OWNER_NUMBER}</p>
-          <p>🕐 <strong>الوقت:</strong> ${new Date().toLocaleString('ar-EG')}</p>
-          <p>📊 <strong>البوتات الفرعية:</strong> ${subBotSockets.size}/${MAX_SUB_BOTS}</p>
-          <p>⚡ <strong>الحالة:</strong> ${botEnabled ? '🟢 نشط' : '🔴 متوقف'}</p>
-        </div>
-        <div class="footer">© 2024 ايرن بوت • جميع الحقوق محفوظة</div>
-      </div>
-    </body>
-    </html>
-  `);
-});
-
-// صفحة للحفاظ على البوت نشط (Ping)
-app.get('/ping', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    bot: botEnabled ? 'active' : 'paused',
-    subBots: subBotSockets.size
-  });
-});
-
-// صفحة للمراقبة (Monitoring)
-app.get('/status', (req, res) => {
-  res.status(200).json({
-    bot: 'Eren Bot',
-    owner: OWNER_NUMBER,
-    status: botEnabled ? 'active' : 'paused',
-    subBots: subBotSockets.size,
-    maxSubBots: MAX_SUB_BOTS,
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString()
-  });
-});
-
-// تشغيل السيرفر
-app.listen(port, () => {
-  console.log(`✅ سيرفر البوت شغال على بورت ${port}`);
-  console.log(`🌐 http://localhost:${port}`);
-});
-
-// ─── إقلاع البوت ──────────────────────────────────────────────────────────
+// ─── إقلاع ───────────────────────────────────────────────────────────────
 console.log('╔═══════════════════════════════════╗');
 console.log('║       🤖  ايرن بوت               ║');
 console.log(`║  📞  ${OWNER_NUMBER}   ║`);
 console.log('╚═══════════════════════════════════╝');
 
-startBot().catch(e => { 
-  console.error('❌ خطأ fatal:', e.message); 
-  setTimeout(startBot, 5000); 
-});
-
-process.on('uncaughtException', e => {
-  console.error('❌ uncaughtException:', e.message);
-});
-
-process.on('unhandledRejection', e => {
-  console.error('❌ unhandledRejection:', String(e));
-});
+startBot().catch(e => { console.error('Fatal:', e.message); setTimeout(startBot, 5000); });
+process.on('uncaughtException',  e => console.error('uncaught:', e.message));
+process.on('unhandledRejection', e => console.error('rejection:', String(e)));
