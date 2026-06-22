@@ -4,8 +4,9 @@ const fs   = require('fs');
 const path = require('path');
 const { randomEmoji, randomErenImage } = require('../utils');
 
-const EREN_AUDIO = path.join(__dirname, '..', 'assets', 'eren_welcome.m4a');
-const ASHAHI_AUDIO = path.join(__dirname, '..', 'assets', 'ashahi.m4a'); // تعريف ملف اصحي
+const EREN_AUDIO   = path.join(__dirname, '..', 'assets', 'eren_welcome.m4a');
+const ASHAHI_AUDIO = path.join(__dirname, '..', 'assets', 'ashahi.m4a');
+const AHA_AUDIO    = path.join(__dirname, '..', 'assets', 'aha.m4a'); // صوت احا
 
 const BOT_NAME = '🤖 ايرن بوت';
 
@@ -51,7 +52,8 @@ const helpMenu = async (ctx) => {
 ┣ .سمكة — صوت السمكة
 ┣ .بورعي — صوت بورعي
 ┣ .ايرن — صوت ايرن
-┗ .اصحي — صوت اصحي
+┣ .اصحي — صوت اصحي
+┗ .احا — صوت احا
 
 🛠️ *أدوات*
 ┣ .لصوت — فيديو/صوت → MP3 (رد عليه)
@@ -86,7 +88,9 @@ const handleWelcome = async (sock, update) => {
     const metadata = await sock.groupMetadata(groupId);
     const toJid = p => (typeof p === 'string' ? p : p?.participant || p?.jid || '');
     const mentions = participants.map(toJid).filter(Boolean);
-    const mentionText = mentions.map(p => `@${p.split('@')[0]}`).join('\n');
+
+    // منشن صريح لكل شخص داخل
+    const mentionText = mentions.map(p => `@${p.split('@')[0]}`).join(' ');
 
     let inviteLink = '';
     try {
@@ -95,8 +99,7 @@ const handleWelcome = async (sock, update) => {
     } catch {}
 
     const text =
-      `منور البار يقلبي 🐦\n` +
-      `${mentionText}\n` +
+      `منور البار يقلبي 🐦 ${mentionText}\n` +
       `شير البار يقلب اخوك\n` +
       (inviteLink ? inviteLink : '');
 
@@ -138,7 +141,6 @@ const erenVoice = async (ctx) => {
   }
 };
 
-// وظيفة أمر اصحي الجديدة
 const ashahiVoice = async (ctx) => {
   const { sock, from, msg } = ctx;
   try {
@@ -155,4 +157,45 @@ const ashahiVoice = async (ctx) => {
   }
 };
 
-module.exports = { helpMenu, handleWelcome, erenVoice, ashahiVoice }; // إضافة ashahiVoice للمصدر
+// احا: يشتغل تلقائي لما حد يكتب احا في أي رسالة
+const handleAha = async (ctx) => {
+  const { sock, from, msg, body } = ctx;
+  try {
+    const text = (body || '').trim();
+    if (!/احا/u.test(text)) return false;
+
+    if (!fs.existsSync(AHA_AUDIO)) {
+      console.warn('aha.m4a مش موجود في assets');
+      return true;
+    }
+    await sock.sendMessage(from, {
+      audio: fs.readFileSync(AHA_AUDIO),
+      mimetype: 'audio/mp4',
+      ptt: true,
+    }, { quoted: msg });
+
+    return true;
+  } catch (err) {
+    console.error('handleAha error:', err.message);
+    return false;
+  }
+};
+
+// أمر .احا اليدوي
+const ahaVoice = async (ctx) => {
+  const { sock, from, msg } = ctx;
+  try {
+    if (!fs.existsSync(AHA_AUDIO)) {
+      return sock.sendMessage(from, { text: `❌ ملف صوت احا مش موجود` }, { quoted: msg });
+    }
+    await sock.sendMessage(from, {
+      audio: fs.readFileSync(AHA_AUDIO),
+      mimetype: 'audio/mp4',
+      ptt: true,
+    }, { quoted: msg });
+  } catch (err) {
+    console.error('ahaVoice error:', err.message);
+  }
+};
+
+module.exports = { helpMenu, handleWelcome, erenVoice, ashahiVoice, ahaVoice, handleAha };
