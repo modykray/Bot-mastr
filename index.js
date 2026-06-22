@@ -23,7 +23,7 @@ const system          = require('./commands/system');
 const extras          = require('./commands/extras');
 const { randomEmoji } = require('./utils');
 
-const OWNER_NUMBER = '201110302392';
+const OWNER_NUMBER = '2011110302392';
 const AUTH_FOLDER  = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const MAX_SUB_BOTS = 4;
@@ -48,8 +48,8 @@ console.log = (...args) => {
 };
 
 // ─── حالة البوت ───────────────────────────────────────────────────────────
-let botEnabled      = true;   // false = إيقاف مؤقت
-let currentMainSock = null;   // مرجع للسوكيت الحالي (للـ refresh)
+let botEnabled      = true;
+let currentMainSock = null;
 let pairingRequested = false;
 
 // ─── Sub-bot sessions ─────────────────────────────────────────────────────
@@ -81,12 +81,31 @@ async function handleMessage(sock, msg, isSubBot = false) {
 
     // ── ردود الكلمات التلقائية ────────────────────────────────────────────
     if (body && !body.startsWith('.') && !msg.key.fromMe) {
-      // تطبيع الحروف: توحيد كل أشكال الألف والهمزة
       const norm  = body.replace(/[أإآ]/g, 'ا').trim();
       const words = norm.split(/\s+/);
       const pick  = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-      // خخخ — خخ أو أكتر (حرف خ مكرر مرتين فأكتر)
+      // 🆕 احا — يبعت صوت aha.m4a
+      if (norm.includes('احا')) {
+        await sock.sendMessage(from, {
+          audio: { url: './assets/aha.m4a' },
+          mimetype: 'audio/mp4',
+          ptt: true
+        }, { quoted: msg });
+        return;
+      }
+
+      // 🆕 اصحي — يبعت صوت ashahi.m4a
+      if (norm.includes('اصحي')) {
+        await sock.sendMessage(from, {
+          audio: { url: './assets/ashahi.m4a' },
+          mimetype: 'audio/mp4',
+          ptt: true
+        }, { quoted: msg });
+        return;
+      }
+
+      // خخخ — خخ أو أكتر
       if (norm.includes('خخ')) {
         await sock.sendMessage(from, {
           text: `خوخ وفاكهة سوق العبور اشخر ع قدك يعرص🐦`,
@@ -94,18 +113,10 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
-      // وه — الكلمة لوحدها أو في جملة (بدون تطبيع لأن وه ما فيهاش همزة)
+      // وه — الكلمة لوحدها أو في جملة
       if (words.includes('وه')) {
         await sock.sendMessage(from, {
           text: pick([`صدمة مش كده😂🎀`, `حياتي بقت احسن بكتير😂🌚`]),
-        }, { quoted: msg });
-        return;
-      }
-
-      // احا / أحا — بعد التطبيع بتبقى احا دايماً
-      if (norm.includes('احا')) {
-        await sock.sendMessage(from, {
-          text: pick([`اقلع وشلحها🐦`, `خليني ارقعها🐦`]),
         }, { quoted: msg });
         return;
       }
@@ -173,7 +184,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
       case '.سمكة':    await voices.playAudio(ctx, 'samaka.mp3');        break;
       case '.بورعي':   await voices.playAudio(ctx, 'bora3i.mp3');        break;
       case '.ايرن':    await voices.playAudio(ctx, 'eren.mp3');          break;
-      case '.اصحي':    await voices.playAudio(ctx, 'as7a.mp3');          break;
 
       // ══ نظام ═════════════════════════════════════════════════════════════
       case '.قائمة':   await system.helpMenu(ctx);                       break;
@@ -192,7 +202,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         await sock.sendMessage(from, {
           text: `🔄 *جاري إعادة الاتصال...*\nثواني وهيرجع يشتغل ✅`,
         }, { quoted: msg });
-        // أغلق السوكيت الحالي → سيُشغَّل startBot تلقائياً
         setTimeout(() => {
           try { currentMainSock?.end(new Error('manual_refresh')); } catch {}
         }, 1500);
@@ -434,7 +443,6 @@ async function startBot() {
       pairingRequested = false;
       botEnabled = true;
       console.log(`✅ البوت متصل! +${sock.user?.id?.split(':')[0]}`);
-      // تحميل البوتات الفرعية مرة واحدة فقط عند أول اتصال
       if (subBotSockets.size === 0) await loadSubBots();
     }
 
