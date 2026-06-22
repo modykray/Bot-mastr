@@ -14,6 +14,7 @@ const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
+const express = require('express');
 
 const entertainment   = require('./commands/entertainment');
 const admin           = require('./commands/admin');
@@ -23,7 +24,7 @@ const system          = require('./commands/system');
 const extras          = require('./commands/extras');
 const { randomEmoji } = require('./utils');
 
-const OWNER_NUMBER = '2011110302392';
+const OWNER_NUMBER = '201110302392';  // ✅ تم التحديث
 const AUTH_FOLDER  = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const MAX_SUB_BOTS = 4;
@@ -471,12 +472,122 @@ async function startBot() {
   });
 }
 
-// ─── إقلاع ───────────────────────────────────────────────────────────────
+// ─── إعداد سيرفر Express ──────────────────────────────────────────────────
+const app = express();
+const port = process.env.PORT || 4000;
+
+// صفحة رئيسية تعرض حالة البوت
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html dir="rtl">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>🤖 ايرن بوت</title>
+      <style>
+        body {
+          font-family: 'Arial', sans-serif;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          min-height: 100vh;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          margin: 0;
+          padding: 20px;
+        }
+        .card {
+          background: white;
+          border-radius: 20px;
+          padding: 40px;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+          max-width: 500px;
+          width: 100%;
+          text-align: center;
+        }
+        .emoji { font-size: 60px; margin-bottom: 10px; }
+        h1 { color: #333; margin: 10px 0; }
+        .status {
+          background: #4CAF50;
+          color: white;
+          padding: 10px 20px;
+          border-radius: 50px;
+          display: inline-block;
+          margin: 10px 0;
+        }
+        .info {
+          text-align: right;
+          background: #f5f5f5;
+          padding: 15px;
+          border-radius: 10px;
+          margin: 20px 0;
+        }
+        .info p { margin: 8px 0; color: #555; }
+        .footer { color: #999; font-size: 12px; margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="emoji">🤖</div>
+        <h1>ايرن بوت</h1>
+        <div class="status">✅ البوت شغال</div>
+        <div class="info">
+          <p>📱 <strong>الأونر:</strong> ${OWNER_NUMBER}</p>
+          <p>🕐 <strong>الوقت:</strong> ${new Date().toLocaleString('ar-EG')}</p>
+          <p>📊 <strong>البوتات الفرعية:</strong> ${subBotSockets.size}/${MAX_SUB_BOTS}</p>
+          <p>⚡ <strong>الحالة:</strong> ${botEnabled ? '🟢 نشط' : '🔴 متوقف'}</p>
+        </div>
+        <div class="footer">© 2024 ايرن بوت • جميع الحقوق محفوظة</div>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// صفحة للحفاظ على البوت نشط (Ping)
+app.get('/ping', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    bot: botEnabled ? 'active' : 'paused',
+    subBots: subBotSockets.size
+  });
+});
+
+// صفحة للمراقبة (Monitoring)
+app.get('/status', (req, res) => {
+  res.status(200).json({
+    bot: 'Eren Bot',
+    owner: OWNER_NUMBER,
+    status: botEnabled ? 'active' : 'paused',
+    subBots: subBotSockets.size,
+    maxSubBots: MAX_SUB_BOTS,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// تشغيل السيرفر
+app.listen(port, () => {
+  console.log(`✅ سيرفر البوت شغال على بورت ${port}`);
+  console.log(`🌐 http://localhost:${port}`);
+});
+
+// ─── إقلاع البوت ──────────────────────────────────────────────────────────
 console.log('╔═══════════════════════════════════╗');
 console.log('║       🤖  ايرن بوت               ║');
 console.log(`║  📞  ${OWNER_NUMBER}   ║`);
 console.log('╚═══════════════════════════════════╝');
 
-startBot().catch(e => { console.error('Fatal:', e.message); setTimeout(startBot, 5000); });
-process.on('uncaughtException',  e => console.error('uncaught:', e.message));
-process.on('unhandledRejection', e => console.error('rejection:', String(e)));
+startBot().catch(e => { 
+  console.error('❌ خطأ fatal:', e.message); 
+  setTimeout(startBot, 5000); 
+});
+
+process.on('uncaughtException', e => {
+  console.error('❌ uncaughtException:', e.message);
+});
+
+process.on('unhandledRejection', e => {
+  console.error('❌ unhandledRejection:', String(e));
+});
