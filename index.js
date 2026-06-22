@@ -14,7 +14,6 @@ const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
-const play = require('play-dl');
 
 const entertainment   = require('./commands/entertainment');
 const admin           = require('./commands/admin');
@@ -56,113 +55,6 @@ let pairingRequested = false;
 // ─── Sub-bot sessions ─────────────────────────────────────────────────────
 const subBotSockets = new Map();
 
-// ─── نظام الأغاني ──────────────────────────────────────────────────────────
-const songRequests = new Map();
-
-// ─── دالة البحث عن الأغاني ──────────────────────────────────────────────
-async function searchAndPlaySong(query, sock, from, msg, isAuto = false) {
-  try {
-    if (isAuto && query.length > 50) {
-      query = query.substring(0, 50);
-    }
-
-    await sock.sendMessage(from, {
-      text: `⏳ *جاري البحث عن:* "${query}"\n${randomEmoji()} ثواني وهتلاقيها...`
-    }, { quoted: msg });
-
-    const searchResults = await play.search(query, { limit: 5 });
-    
-    if (!searchResults || searchResults.length === 0) {
-      await sock.sendMessage(from, {
-        text: `❌ مفيش نتائج للبحث: *${query}*\nجرب كلمات تانية 🎵`
-      }, { quoted: msg });
-      return null;
-    }
-
-    if (isAuto || searchResults.length === 1) {
-      const video = searchResults[0];
-      await playYoutubeAudio(video.url, sock, from, msg, video);
-      return video;
-    }
-
-    let message = `🎵 *اختر الأغنية:*\n\n`;
-    searchResults.forEach((video, i) => {
-      message += `${i + 1}. *${video.title}*\n`;
-      message += `   👤 ${video.channel?.name || 'غير معروف'} | ⏱️ ${video.durationRaw || 'غير معروف'}\n\n`;
-    });
-    message += `📝 اكتب رقم الأغنية (1-${searchResults.length})`;
-    
-    songRequests.set(from, {
-      videos: searchResults,
-      timestamp: Date.now()
-    });
-
-    await sock.sendMessage(from, { text: message }, { quoted: msg });
-    return searchResults[0];
-    
-  } catch (e) {
-    console.error('خطأ في البحث:', e.message);
-    await sock.sendMessage(from, {
-      text: `❌ حصل خطأ في البحث: ${e.message}`
-    }, { quoted: msg });
-    return null;
-  }
-}
-
-// ─── تشغيل الصوت من يوتيوب ──────────────────────────────────────────────
-async function playYoutubeAudio(url, sock, from, msg, video) {
-  try {
-    await sock.sendMessage(from, {
-      text: `🎵 *${video.title}*\n👤 ${video.channel?.name || 'غير معروف'}\n⏱️ ${video.durationRaw || 'غير معروف'}\n\n⏳ جاري التحميل...`
-    }, { quoted: msg });
-
-    const stream = await play.stream(url, { 
-      quality: 1,
-      discordPlayerCompatibility: true 
-    });
-
-    await sock.sendMessage(from, {
-      audio: stream.stream,
-      mimetype: 'audio/mp4',
-      ptt: true
-    }, { quoted: msg });
-
-    return true;
-    
-  } catch (e) {
-    console.error('خطأ في تشغيل الصوت:', e.message);
-    await sock.sendMessage(from, {
-      text: `❌ مش قادر احمل الصوت دلوقتي\n🎥 شوف الفيديو هنا:\n${url}`
-    }, { quoted: msg });
-    return false;
-  }
-}
-
-// ─── معالجة اختيار الأغنية ──────────────────────────────────────────────
-async function handleSongChoice(sock, msg, from, sender) {
-  const body = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-  const number = parseInt(body.trim());
-  
-  if (isNaN(number) || number < 1) return false;
-  
-  const request = songRequests.get(from);
-  if (!request) return false;
-  
-  if (Date.now() - request.timestamp > 300000) {
-    songRequests.delete(from);
-    return false;
-  }
-  
-  if (number <= request.videos.length) {
-    const video = request.videos[number - 1];
-    songRequests.delete(from);
-    await playYoutubeAudio(video.url, sock, from, msg, video);
-    return true;
-  }
-  
-  return false;
-}
-
 // ─── معالجة الرسائل المشتركة ──────────────────────────────────────────────
 async function handleMessage(sock, msg, isSubBot = false) {
   try {
@@ -179,24 +71,21 @@ async function handleMessage(sock, msg, isSubBot = false) {
       msg.message?.imageMessage?.caption     ||
       msg.message?.videoMessage?.caption     || '';
 
-    // ── معالجة اختيارات الأغاني ────────────────────────────────────────
-    const songChoiceHandled = await handleSongChoice(sock, msg, from, sender);
-    if (songChoiceHandled) return;
-
     // ── فحص منع الروابط ──────────────────────────────────────────────────
     if (!msg.key.fromMe && isGrp) {
       await admin.checkAntiLink(sock, msg, from, sender);
     }
 
-    // ── لو البوت موقوف ────────────────────────────────────────────────────
+    // ── لو البوت موقوف — الأونر بس يقدر يشغّله تاني ─────────────────────
     if (!botEnabled && !isOwner) return;
 
-    // ── ردود الكلمات التلقائية ──────────────────────────────────────────
+    // ── ردود الكلمات التلقائية ────────────────────────────────────────────
     if (body && !body.startsWith('.') && !msg.key.fromMe) {
       const norm  = body.replace(/[أإآ]/g, 'ا').trim();
       const words = norm.split(/\s+/);
       const pick  = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
+      // احا — يبعت صوت aha.m4a
       if (norm.includes('احا')) {
         await sock.sendMessage(from, {
           audio: { url: './assets/aha.m4a' },
@@ -206,6 +95,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
+      // اصحي — يبعت صوت ashahi.m4a
       if (norm.includes('اصحي')) {
         await sock.sendMessage(from, {
           audio: { url: './assets/ashahi.m4a' },
@@ -215,6 +105,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
+      // خخخ — خخ أو أكتر
       if (norm.includes('خخ')) {
         await sock.sendMessage(from, {
           text: `خوخ وفاكهة سوق العبور اشخر ع قدك يعرص🐦`,
@@ -222,6 +113,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
+      // وه — الكلمة لوحدها أو في جملة
       if (words.includes('وه')) {
         await sock.sendMessage(from, {
           text: pick([`صدمة مش كده😂🎀`, `حياتي بقت احسن بكتير😂🌚`]),
@@ -229,22 +121,12 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
+      // يسطا — الكلمة في أي مكان في الجملة
       if (norm.includes('يسطا')) {
         await sock.sendMessage(from, {
           text: pick([`اي يسطا🌚🫶🏻`, `قلب الاسطي😂🫶🏻`, `يسطا خدتك ع البسطه😂🫶🏻`]),
         }, { quoted: msg });
         return;
-      }
-
-      // ── تشغيل الأغاني التلقائي ──────────────────────────────────────
-      if (norm.length > 4) {
-        const commonWords = ['اهلا', 'مرحبا', 'شكرا', 'حبيبي', 'سلام', 'كيف', 'الحمد', 'ربنا', 'ماشي', 'تمام', 'حلو', 'ازاي', 'ايه', 'مالك', 'ليه'];
-        const isCommon = commonWords.some(word => norm.includes(word));
-        
-        if (!isCommon && !norm.includes('احا') && !norm.includes('اصحي') && !norm.includes('خخ') && !norm.includes('وه') && !norm.includes('يسطا')) {
-          await searchAndPlaySong(norm, sock, from, msg, true);
-          return;
-        }
       }
 
       await extras.checkQuizAnswer(sock, from, body);
@@ -290,54 +172,13 @@ async function handleMessage(sock, msg, isSubBot = false) {
       case '.جروب_وصف':  await extras.changeGroupDesc(ctx);              break;
 
       // ══ ميديا ════════════════════════════════════════════════════════════
-      case '.اغنية':
-      case '.شغل': {
-        if (!parts[1]) {
-          await sock.sendMessage(from, {
-            text: `🎵 *طريقة الاستخدام:*\n.اغنية [اسم الأغنية]\n\nمثال: .اغنية من كتر الغياب`
-          }, { quoted: msg });
-          break;
-        }
-        const query = parts.slice(1).join(' ');
-        await searchAndPlaySong(query, sock, from, msg, false);
-        break;
-      }
-
+      case '.شغل':     await media.playYouTube(ctx);                     break;
       case '.تيكتوك':  await media.downloadTikTok(ctx);                  break;
       case '.انستا':   await media.downloadInstagram(ctx);               break;
       case '.لصوت':    await extras.toMp3(ctx);                          break;
       case '.لجيف':    await extras.toGif(ctx);                          break;
       case '.لصوره':   await extras.toImage(ctx);                        break;
       case '.نسخ':     await extras.ocr(ctx);                            break;
-
-      // ══ بحث متقدم ═══════════════════════════════════════════════════════
-      case '.بحث': {
-        if (!parts[1]) {
-          await sock.sendMessage(from, {
-            text: `🔍 *طريقة الاستخدام:*\n.بحث [كلمة البحث]\n\nمثال: .بحث اغاني حزينة`
-          }, { quoted: msg });
-          break;
-        }
-        const query = parts.slice(1).join(' ');
-        const results = await play.search(query, { limit: 5 });
-        
-        if (!results || results.length === 0) {
-          await sock.sendMessage(from, {
-            text: `❌ مفيش نتائج للبحث: *${query}*`
-          }, { quoted: msg });
-          break;
-        }
-        
-        let list = `🔍 *نتائج البحث:* "${query}"\n\n`;
-        results.forEach((video, i) => {
-          list += `${i + 1}. 🎵 *${video.title}*\n`;
-          list += `   👤 ${video.channel?.name || 'غير معروف'} | ⏱️ ${video.durationRaw || 'غير معروف'}\n`;
-          list += `   🔗 ${video.url}\n\n`;
-        });
-        
-        await sock.sendMessage(from, { text: list }, { quoted: msg });
-        break;
-      }
 
       // ══ أصوات ════════════════════════════════════════════════════════════
       case '.سمكة':    await voices.playAudio(ctx, 'samaka.mp3');        break;
