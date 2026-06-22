@@ -5,6 +5,7 @@ const path = require('path');
 const { randomEmoji, randomErenImage } = require('../utils');
 
 const EREN_AUDIO = path.join(__dirname, '..', 'assets', 'eren_welcome.m4a');
+const ASHAHI_AUDIO = path.join(__dirname, '..', 'assets', 'ashahi.m4a'); // تعريف ملف اصحي
 
 const BOT_NAME = '🤖 ايرن بوت';
 
@@ -106,7 +107,6 @@ const handleWelcome = async (sock, update) => {
       await sock.sendMessage(groupId, { text: text.trim(), mentions });
     }
 
-    // ── إرسال صوت ايرن تلقائي مع الترحيب ───────────────────────────────
     try {
       if (fs.existsSync(EREN_AUDIO)) {
         await sock.sendMessage(groupId, {
@@ -138,4 +138,21 @@ const erenVoice = async (ctx) => {
   }
 };
 
-module.exports = { helpMenu, handleWelcome, erenVoice };
+// وظيفة أمر اصحي الجديدة
+const ashahiVoice = async (ctx) => {
+  const { sock, from, msg } = ctx;
+  try {
+    if (!fs.existsSync(ASHAHI_AUDIO)) {
+      return sock.sendMessage(from, { text: `❌ ملف صوت اصحي مش موجود` }, { quoted: msg });
+    }
+    await sock.sendMessage(from, {
+      audio: fs.readFileSync(ASHAHI_AUDIO),
+      mimetype: 'audio/mp4',
+      ptt: true,
+    }, { quoted: msg });
+  } catch (err) {
+    console.error('ashahiVoice error:', err.message);
+  }
+};
+
+module.exports = { helpMenu, handleWelcome, erenVoice, ashahiVoice }; // إضافة ashahiVoice للمصدر
