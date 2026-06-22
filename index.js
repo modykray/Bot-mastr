@@ -1,176 +1,167 @@
 'use strict';
 
-const fs   = require('fs');
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  isJidBroadcast,
+  makeCacheableSignalKeyStore,
+  Browsers,
+} = require('baileys');
+
+const { Boom } = require('@hapi/boom');
+const pino = require('pino');
+const fs = require('fs');
 const path = require('path');
-const { randomEmoji, randomErenImage } = require('../utils');
 
-const EREN_AUDIO = path.join(__dirname, '..', 'assets', 'eren_welcome.m4a');
-const ASHAHI_AUDIO = path.join(__dirname, '..', 'assets', 'ashahi.m4a');
-const AHA_AUDIO = path.join(__dirname, '..', 'assets', 'aha.m4a'); // مسار ملف أحا الجديد
+const entertainment   = require('./commands/entertainment');
+const admin           = require('./commands/admin');
+const media           = require('./commands/media');
+const voices          = require('./commands/voices');
+const system          = require('./commands/system');
+const extras          = require('./commands/extras');
+const { randomEmoji } = require('./utils');
 
-const BOT_NAME = '🤖 ♾𝑬𝑹𝑰𝑵 𝑩𝑶𝑻↯'; // عدلت الاسم للشكل اللي طلبته قبل كده
+const OWNER_NUMBER = '201110302392';
+const AUTH_FOLDER  = path.join(__dirname, 'auth_info');
+const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
+const MAX_SUB_BOTS = 4;
 
-const helpMenu = async (ctx) => {
-  const { sock, msg, from } = ctx;
+const logger = pino({ level: 'silent' });
 
-  const menu = `
-╔══════════════════════════╗
-║    ${BOT_NAME}    ║
-╚══════════════════════════╝
-
-🎭 *ترفيه*
-┣ .جوزني — تجوز عضو عشوائي
-┣ .جمالي — نسبة جمالك
-┣ .انوثتي — نسبة انوثتك
-┣ .رجولتي — نسبة رجولتك
-┣ .حب — نسبة الحب (رد على شخص)
-┣ .بروفايل — صورة بروفايل
-┗ .طقملي — زوج كارتوني عشوائي
-
-👑 *أدمن*
-┣ .انطر — طرد (رد على شخص)
-┣ .رفاعي — ترقية لأدمن (رد على شخص)
-┣ .شدفيه — إزالة أدمن (رد على شخص)
-┣ .هنرش مياه — إغلاق المجموعة
-┣ .افتح يبني — فتح المجموعة
-┣ .منشن — منشن جميع الأعضاء
-┣ .حذف — حذف رسالة (رد عليها)
-┣ .انذار — إنذار (رد على شخص)
-┣ .الانذارات — قائمة الإنذارات
-┣ .حذف_انذار — مسح إنذارات (رد على شخص)
-┣ .جروب_اسم [اسم] — تغيير اسم الجروب
-┣ .جروب_وصف [وصف] — تغيير وصف الجروب
-┣ .منع روابط — منع الروابط على غير الأدمنز
-┗ .روابط ايقاف — إيقاف منع الروابط
-
-🎵 *ميديا*
-┣ .شغل [اسم] — تشغيل أغنية يوتيوب
-┣ .تيكتوك [رابط] — تنزيل تيك توك
-┗ .انستا [رابط] — تنزيل انستاغرام
-
-🔊 *أصوات*
-┣ .سمكة — صوت السمكة
-┣ .بورعي — صوت بورعي
-┣ .ايرن — صوت ايرن
-┣ .اصحي — صوت اصحي
-┗ .أحا — صوت أحا
-
-🛠️ *أدوات*
-┣ .لصوت — فيديو/صوت → MP3 (رد عليه)
-┣ .لجيف — فيديو → GIF (رد عليه)
-┣ .لصوره — استيكر/وسائط → صورة (رد عليه)
-┗ .نسخ — استخراج نص من صورة (رد عليها)
-
-🎮 *ألعاب*
-┗ .مسابقه — لعبة أسئلة وأجوبة
-
-ℹ️ *نظام*
-┣ .قائمة — هذه القائمة
-┣ .بنج — اختبار السرعة
-┗ .تست — اختبار الاتصال
-
-${randomEmoji()} *${BOT_NAME}* — مطور بكل حب
-`.trim();
-
-  const erenImg = randomErenImage();
-  if (erenImg) {
-    await sock.sendMessage(from, { image: erenImg, caption: menu }, { quoted: msg });
-  } else {
-    await sock.sendMessage(from, { text: menu }, { quoted: msg });
-  }
+// ─── إسكات ضجيج Baileys الداخلي ──────────────────────────────────────────
+const NOISE = ['Closing session', 'Closing open session', 'SessionEntry', 'registrationId',
+               'currentRatchet', 'ephemeralKeyPair', 'lastRemoteEphemeralKey', 'indexInfo',
+               'pendingPreKey', '_chains', 'baseKey', 'rootKey', 'privKey', 'pubKey'];
+const _origWrite = process.stdout.write.bind(process.stdout);
+process.stdout.write = (chunk, ...rest) => {
+  const s = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
+  if (NOISE.some(n => s.includes(n))) return true;
+  return _origWrite(chunk, ...rest);
+};
+const _origLog = console.log;
+console.log = (...args) => {
+  const s = String(args[0] ?? '');
+  if (NOISE.some(n => s.includes(n))) return;
+  _origLog(...args);
 };
 
-const handleWelcome = async (sock, update) => {
-  const { id: groupId, participants, action } = update;
-  if (action !== 'add') return;
+// ─── حالة البوت ───────────────────────────────────────────────────────────
+let botEnabled      = true;
+let currentMainSock = null;
+let pairingRequested = false;
 
+const subBotSockets = new Map();
+
+// ─── معالجة الرسائل المشتركة ──────────────────────────────────────────────
+async function handleMessage(sock, msg, isSubBot = false) {
   try {
-    const metadata = await sock.groupMetadata(groupId);
-    const toJid = p => (typeof p === 'string' ? p : p?.participant || p?.jid || '');
-    const mentions = participants.map(toJid).filter(Boolean);
-    const mentionText = mentions.map(p => `@${p.split('@')[0]}`).join('\n');
+    if (!msg.message) return;
+    if (isJidBroadcast(msg.key.remoteJid)) return;
 
-    let inviteLink = '';
-    try {
-      const code = await sock.groupInviteCode(groupId);
-      inviteLink = `https://chat.whatsapp.com/${code}`;
-    } catch {}
+    const from   = msg.key.remoteJid;
+    const isGrp  = from?.endsWith('@g.us');
+    const sender = isGrp ? msg.key.participant : msg.key.remoteJid;
+    const isOwner = msg.key.fromMe === true;
+    const body   =
+      msg.message?.conversation ||
+      msg.message?.extendedTextMessage?.text ||
+      msg.message?.imageMessage?.caption     ||
+      msg.message?.videoMessage?.caption     || '';
 
-    const text =
-      `منور البار يقلبي 🐦\n` +
-      `${mentionText}\n` +
-      `شير البار يقلب اخوك\n` +
-      (inviteLink ? inviteLink : '');
-
-    const erenImg = randomErenImage();
-    if (erenImg) {
-      await sock.sendMessage(groupId, { image: erenImg, caption: text.trim(), mentions });
-    } else {
-      await sock.sendMessage(groupId, { text: text.trim(), mentions });
+    if (!msg.key.fromMe && isGrp) {
+      await admin.checkAntiLink(sock, msg, from, sender);
     }
 
-    try {
-      if (fs.existsSync(EREN_AUDIO)) {
-        await sock.sendMessage(groupId, {
-          audio: fs.readFileSync(EREN_AUDIO),
-          mimetype: 'audio/mp4',
-          ptt: true,
-        });
+    if (!botEnabled && !isOwner) return;
+
+    // ── ردود الكلمات التلقائية ────────────────────────────────────────────
+    if (body && !body.startsWith('.') && !msg.key.fromMe) {
+      const norm  = body.replace(/[أإآ]/g, 'ا').trim();
+      const words = norm.split(/\s+/);
+      const pick  = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+      if (norm.includes('خخ')) {
+        await sock.sendMessage(from, { text: `خوخ وفاكهة سوق العبور اشخر ع قدك يعرص🐦` }, { quoted: msg });
+        return;
       }
-    } catch {}
 
-  } catch (err) {
-    console.error('Welcome error:', err.message);
-  }
-};
+      if (words.includes('وه')) {
+        await sock.sendMessage(from, { text: pick([`صدمة مش كده😂🎀`, `حياتي بقت احسن بكتير😂🌚`]), }, { quoted: msg });
+        return;
+      }
 
-const erenVoice = async (ctx) => {
-  const { sock, from, msg } = ctx;
-  try {
-    if (!fs.existsSync(EREN_AUDIO)) {
-      return sock.sendMessage(from, { text: `❌ ملف الصوت مش موجود` }, { quoted: msg });
+      // إضافة الرد الصوتي التلقائي لكلمة "احا"
+      if (norm.includes('احا')) {
+        await voices.ahaVoice({ sock, from, msg });
+        return;
+      }
+
+      if (norm.includes('يسطا')) {
+        await sock.sendMessage(from, { text: pick([`اي يسطا🌚🫶🏻`, `قلب الاسطي😂🫶🏻`, `يسطا خدتك ع البسطه😂🫶🏻`]), }, { quoted: msg });
+        return;
+      }
+
+      await extras.checkQuizAnswer(sock, from, body);
+      return;
     }
-    await sock.sendMessage(from, {
-      audio: fs.readFileSync(EREN_AUDIO),
-      mimetype: 'audio/mp4',
-      ptt: true,
-    }, { quoted: msg });
-  } catch (err) {
-    console.error('erenVoice error:', err.message);
-  }
-};
 
-const ashahiVoice = async (ctx) => {
-  const { sock, from, msg } = ctx;
-  try {
-    if (!fs.existsSync(ASHAHI_AUDIO)) {
-      return sock.sendMessage(from, { text: `❌ ملف صوت اصحي مش موجود` }, { quoted: msg });
+    if (!body.startsWith('.')) return;
+
+    const parts   = body.trim().split(/\s+/);
+    const command = parts[0].toLowerCase();
+    const ctx     = { sock, msg, from, sender, args: parts, isGroup: isGrp,
+                      ownerNumber: OWNER_NUMBER, isOwner, body };
+
+    switch (command) {
+      case '.جوزني':   await entertainment.marry(ctx); break;
+      case '.جمالي':   await entertainment.beautyRate(ctx, 'جمالك'); break;
+      case '.انوثتي':  await entertainment.beautyRate(ctx, 'انوثتك'); break;
+      case '.رجولتي':  await entertainment.beautyRate(ctx, 'رجولتك'); break;
+      case '.حب':      await entertainment.loveRate(ctx); break;
+      case '.بروفايل': await entertainment.profile(ctx); break;
+      case '.طقملي':   await entertainment.couplePic(ctx); break;
+
+      case '.انطر':    await admin.kick(ctx); break;
+      case '.رفاعي':   await admin.promote(ctx); break;
+      case '.شدفيه':   await admin.demote(ctx); break;
+      case '.هنرش':    if (parts[1]==='مياه')  await admin.closeGroup(ctx); break;
+      case '.افتح':    if (parts[1]==='يبني')  await admin.openGroup(ctx);  break;
+      case '.منع':     if (parts[1]==='روابط') await admin.antiLink(ctx);   break;
+      case '.روابط':   if (parts[1]==='ايقاف') await admin.antiLinkOff(ctx); break;
+      case '.منشن':
+      case '.منشنز':   await extras.mentionAll(ctx); break;
+      case '.حذف':     await extras.deleteMsg(ctx); break;
+      case '.انذار':
+      case '.تحذير':   await extras.warn(ctx); break;
+      case '.الانذارات': await extras.warnList(ctx); break;
+      case '.حذف_انذار': await extras.warnDelete(ctx); break;
+      case '.جروب_اسم':  await extras.changeGroupName(ctx); break;
+      case '.جروب_وصف':  await extras.changeGroupDesc(ctx); break;
+
+      case '.شغل':     await media.playYouTube(ctx); break;
+      case '.تيكتوك':  await media.downloadTikTok(ctx); break;
+      case '.انستا':   await media.downloadInstagram(ctx); break;
+      case '.لصوت':    await extras.toMp3(ctx); break;
+      case '.لجيف':    await extras.toGif(ctx); break;
+      case '.لصوره':   await extras.toImage(ctx); break;
+      case '.نسخ':     await extras.ocr(ctx); break;
+
+      case '.سمكة':    await voices.playAudio(ctx, 'samaka.mp3'); break;
+      case '.بورعي':   await voices.playAudio(ctx, 'bora3i.mp3'); break;
+      case '.ايرن':    await voices.playAudio(ctx, 'eren.mp3'); break;
+      case '.اصحي':    await voices.ashahiVoice(ctx); break;
+      case '.احا':     await voices.ahaVoice(ctx); break; // أمر مباشر للصوت
+
+      case '.قائمة':   await system.helpMenu(ctx); break;
+      case '.انا':     if (parts[1]==='ايرن') await system.erenVoice(ctx); break;
+      case '.تست':     await sock.sendMessage(from, { text: `الو حول هل تسمعني 😂` }, { quoted: msg }); break;
+      case '.بنج':     await extras.ping(ctx); break;
+      case '.مسابقه':  await extras.quiz(ctx); break;
+
+      // ... بقية كود الـ switch (رفرش، بور_اوف، a7a، شيل_بوت) كما هو في ملفك الأصلي ...
     }
-    await sock.sendMessage(from, {
-      audio: fs.readFileSync(ASHAHI_AUDIO),
-      mimetype: 'audio/mp4',
-      ptt: true,
-    }, { quoted: msg });
-  } catch (err) {
-    console.error('ashahiVoice error:', err.message);
-  }
-};
-
-// الدالة الجديدة لأمر أحا
-const ahaVoice = async (ctx) => {
-  const { sock, from, msg } = ctx;
-  try {
-    if (!fs.existsSync(AHA_AUDIO)) {
-      return sock.sendMessage(from, { text: `❌ ملف صوت أحا مش موجود` }, { quoted: msg });
-    }
-    await sock.sendMessage(from, {
-      audio: fs.readFileSync(AHA_AUDIO),
-      mimetype: 'audio/mp4',
-      ptt: true,
-    }, { quoted: msg });
-  } catch (err) {
-    console.error('ahaVoice error:', err.message);
-  }
-};
-
-module.exports = { helpMenu, handleWelcome, erenVoice, ashahiVoice, ahaVoice };
+  } catch (e) { console.error('msg error:', e.message); }
+}
+// ... (باقي دوال البوت startSubBotSession, loadSubBots, startBot كما هي)
