@@ -14,6 +14,8 @@ const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
+const ytdl = require('@distube/ytdl-core');
+const ytSearch = require('yt-search');
 
 const entertainment   = require('./commands/entertainment');
 const admin           = require('./commands/admin');
@@ -55,6 +57,138 @@ let pairingRequested = false;
 // ─── Sub-bot sessions ─────────────────────────────────────────────────────
 const subBotSockets = new Map();
 
+// ─── نظام الأغاني ──────────────────────────────────────────────────────────
+const songRequests = new Map(); // لتخزين طلبات الأغاني مؤقتاً
+
+// ─── دالة البحث عن الأغاني ──────────────────────────────────────────────
+async function searchAndPlaySong(query, sock, from, msg, isAuto = false) {
+  try {
+    // لو كان تلقائي وطويل جداً، اختصر
+    if (isAuto && query.length > 50) {
+      query = query.substring(0, 50);
+    }
+
+    // رسالة انتظار
+    await sock.sendMessage(from, {
+      text: `⏳ *جاري البحث عن:* "${query}"\n${randomEmoji()} ثواني وهتلاقيها...`
+    }, { quoted: msg });
+
+    // البحث في يوتيوب
+    const searchResults = await ytSearch(query + ' audio');
+    
+    if (!searchResults || !searchResults.videos || searchResults.videos.length === 0) {
+      await sock.sendMessage(from, {
+        text: `❌ مفيش نتائج للبحث: *${query}*\nجرب كلمات تانية 🎵`
+      }, { quoted: msg });
+      return null;
+    }
+
+    // لو فيديو واحد بس، شغله مباشرة
+    if (searchResults.videos.length === 1) {
+      await playYoutubeAudio(searchResults.videos[0], sock, from, msg);
+      return searchResults.videos[0];
+    }
+
+    // لو في أكتر من فيديو، عرض اختيارات (للتلقائي هشغل أول واحد)
+    if (isAuto) {
+      const video = searchResults.videos[0];
+      await playYoutubeAudio(video, sock, from, msg);
+      return video;
+    }
+
+    // للأمر .اغنية - عرض اختيارات
+    const videos = searchResults.videos.slice(0, 5);
+    
+    let message = `🎵 *اختر الأغنية:*\n\n`;
+    videos.forEach((video, i) => {
+      message += `${i + 1}. *${video.title}*\n`;
+      message += `   👤 ${video.author.name} | ⏱️ ${video.duration}\n\n`;
+    });
+    message += `📝 اكتب رقم الأغنية (1-${videos.length})`;
+    
+    // حفظ النتائج مؤقتاً
+    songRequests.set(from, {
+      videos,
+      timestamp: Date.now(),
+      sender: msg.key.participant || from
+    });
+
+    await sock.sendMessage(from, {
+      text: message
+    }, { quoted: msg });
+    
+    return videos[0];
+    
+  } catch (e) {
+    console.error('خطأ في البحث:', e.message);
+    await sock.sendMessage(from, {
+      text: `❌ حصل خطأ في البحث: ${e.message}`
+    }, { quoted: msg });
+    return null;
+  }
+}
+
+// ─── تشغيل الصوت من يوتيوب ──────────────────────────────────────────────
+async function playYoutubeAudio(video, sock, from, msg) {
+  try {
+    // رسالة تأكيد
+    await sock.sendMessage(from, {
+      text: `🎵 *${video.title}*\n👤 ${video.author.name}\n⏱️ ${video.duration}\n\n⏳ جاري التحميل...`
+    }, { quoted: msg });
+
+    // تحميل الصوت من يوتيوب
+    const stream = ytdl(video.url, {
+      filter: 'audioonly',
+      quality: 'lowestaudio',
+      highWaterMark: 1 << 25,
+    });
+
+    // إرسال الصوت
+    await sock.sendMessage(from, {
+      audio: stream,
+      mimetype: 'audio/mp4',
+      ptt: true
+    }, { quoted: msg });
+
+    return true;
+    
+  } catch (e) {
+    console.error('خطأ في تشغيل الصوت:', e.message);
+    
+    // لو فشل التحميل، ابعت لينك الفيديو
+    await sock.sendMessage(from, {
+      text: `❌ مش قادر احمل الصوت دلوقتي\n🎥 لكن شوف الفيديو هنا:\n${video.url}\n\n🎵 *${video.title}* - ${video.author.name}`
+    }, { quoted: msg });
+    return false;
+  }
+}
+
+// ─── معالجة اختيار الأغنية ──────────────────────────────────────────────
+async function handleSongChoice(sock, msg, from, sender) {
+  const body = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+  const number = parseInt(body.trim());
+  
+  if (isNaN(number) || number < 1) return false;
+  
+  const request = songRequests.get(from);
+  if (!request) return false;
+  
+  // لو مر وقت طويل (5 دقايق)
+  if (Date.now() - request.timestamp > 300000) {
+    songRequests.delete(from);
+    return false;
+  }
+  
+  if (number <= request.videos.length) {
+    const video = request.videos[number - 1];
+    songRequests.delete(from);
+    await playYoutubeAudio(video, sock, from, msg);
+    return true;
+  }
+  
+  return false;
+}
+
 // ─── معالجة الرسائل المشتركة ──────────────────────────────────────────────
 async function handleMessage(sock, msg, isSubBot = false) {
   try {
@@ -70,6 +204,10 @@ async function handleMessage(sock, msg, isSubBot = false) {
       msg.message?.extendedTextMessage?.text ||
       msg.message?.imageMessage?.caption     ||
       msg.message?.videoMessage?.caption     || '';
+
+    // ── معالجة اختيارات الأغاني ────────────────────────────────────────
+    const songChoiceHandled = await handleSongChoice(sock, msg, from, sender);
+    if (songChoiceHandled) return;
 
     // ── فحص منع الروابط ──────────────────────────────────────────────────
     if (!msg.key.fromMe && isGrp) {
@@ -129,6 +267,18 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
+      // ── تشغيل الأغاني التلقائي ──────────────────────────────────────────
+      // لو الكلام طويل نسبياً مش كلمة قصيرة
+      if (norm.length > 4) {
+        const commonWords = ['اهلا', 'مرحبا', 'شكرا', 'حبيبي', 'سلام', 'كيف', 'الحمد', 'ربنا', 'ماشي', 'تمام', 'حلو', 'ازاي', 'ايه', 'مالك', 'ليه'];
+        const isCommon = commonWords.some(word => norm.includes(word));
+        
+        if (!isCommon && !norm.includes('احا') && !norm.includes('اصحي') && !norm.includes('خخ') && !norm.includes('وه') && !norm.includes('يسطا')) {
+          await searchAndPlaySong(norm, sock, from, msg, true);
+          return;
+        }
+      }
+
       await extras.checkQuizAnswer(sock, from, body);
       return;
     }
@@ -172,13 +322,56 @@ async function handleMessage(sock, msg, isSubBot = false) {
       case '.جروب_وصف':  await extras.changeGroupDesc(ctx);              break;
 
       // ══ ميديا ════════════════════════════════════════════════════════════
-      case '.شغل':     await media.playYouTube(ctx);                     break;
+      case '.اغنية':
+      case '.شغل': {
+        if (!parts[1]) {
+          await sock.sendMessage(from, {
+            text: `🎵 *طريقة الاستخدام:*\n.اغنية [اسم الأغنية]\n\nمثال: .اغنية من كتر الغياب\n.اغنية بحلمك`
+          }, { quoted: msg });
+          break;
+        }
+        const query = parts.slice(1).join(' ');
+        await searchAndPlaySong(query, sock, from, msg, false);
+        break;
+      }
+
       case '.تيكتوك':  await media.downloadTikTok(ctx);                  break;
       case '.انستا':   await media.downloadInstagram(ctx);               break;
       case '.لصوت':    await extras.toMp3(ctx);                          break;
       case '.لجيف':    await extras.toGif(ctx);                          break;
       case '.لصوره':   await extras.toImage(ctx);                        break;
       case '.نسخ':     await extras.ocr(ctx);                            break;
+
+      // ══ بحث متقدم ═══════════════════════════════════════════════════════
+      case '.بحث': {
+        if (!parts[1]) {
+          await sock.sendMessage(from, {
+            text: `🔍 *طريقة الاستخدام:*\n.بحث [كلمة البحث]\n\nمثال: .بحث اغاني حزينة\n.بحث تامر حسني`
+          }, { quoted: msg });
+          break;
+        }
+        const query = parts.slice(1).join(' ');
+        const results = await ytSearch(query);
+        
+        if (!results || !results.videos || results.videos.length === 0) {
+          await sock.sendMessage(from, {
+            text: `❌ مفيش نتائج للبحث: *${query}*`
+          }, { quoted: msg });
+          break;
+        }
+        
+        let list = `🔍 *نتائج البحث:* "${query}"\n\n`;
+        results.videos.slice(0, 5).forEach((video, i) => {
+          list += `${i + 1}. 🎵 *${video.title}*\n`;
+          list += `   👤 ${video.author.name} | ⏱️ ${video.duration}\n`;
+          list += `   🔗 ${video.url}\n\n`;
+        });
+        
+        await sock.sendMessage(from, {
+          text: list
+        }, { quoted: msg });
+        break;
+      }
 
       // ══ أصوات ════════════════════════════════════════════════════════════
       case '.سمكة':    await voices.playAudio(ctx, 'samaka.mp3');        break;
@@ -461,8 +654,59 @@ async function startBot() {
   });
 
   sock.ev.on('group-participants.update', async (update) => {
-    try { if (update.action === 'add') await system.handleWelcome(sock, update); }
-    catch (e) { console.error('welcome error:', e.message); }
+    try {
+      if (update.action === 'add') {
+        // جلب معلومات الشخص الجديد
+        const newMember = update.participants[0];
+        const groupId = update.id;
+        
+        // الحصول على معلومات المجموعة للحصول على اسم المجموعة
+        let groupName = 'المجموعة';
+        try {
+          const groupMetadata = await sock.groupMetadata(groupId);
+          groupName = groupMetadata.subject || 'المجموعة';
+        } catch (e) {
+          console.error('خطأ في جلب معلومات المجموعة:', e.message);
+        }
+
+        // الحصول على اسم الشخص الجديد
+        let memberName = 'الواصل الجديد';
+        try {
+          const contact = await sock.getContact(newMember);
+          memberName = contact.name || contact.pushname || contact.verifiedName || 'الواصل الجديد';
+        } catch (e) {
+          console.error('خطأ في جلب معلومات العضو:', e.message);
+        }
+
+        // رسالة الترحيب مع منشن للشخص الجديد
+        const welcomeMessages = [
+          `منور البار يقلبي 🐦 @${newMember.split('@')[0]}`,
+          `شير البار يقلب اخوك 🐦 @${newMember.split('@')[0]}`,
+          `اهلاً بك في ${groupName} يا @${newMember.split('@')[0]} 🐦`,
+          `نورت الدنيا يا @${newMember.split('@')[0]} 🐦`,
+          `فرحتنا بيك يا @${newMember.split('@')[0]} 🐦`,
+          `عيش معانا يا @${newMember.split('@')[0]} 🐦`,
+          `قلبنا معاك يا @${newMember.split('@')[0]} 🐦`,
+          `يا مرحبا بك @${newMember.split('@')[0]} 🐦`,
+          `نورت المجموعة يا @${newMember.split('@')[0]} 🐦`,
+          `حبيبي @${newMember.split('@')[0]} منور 🐦`,
+          `منور يا عسل @${newMember.split('@')[0]} 🐦`,
+          `شرفتنا يا @${newMember.split('@')[0]} 🐦`,
+          `يا @${newMember.split('@')[0]} نورت 🌟`,
+          `وصل الضيف الغالي @${newMember.split('@')[0]} 🎉`,
+          `اعلنوا قدوم @${newMember.split('@')[0]} 🎊`
+        ];
+        
+        const randomWelcome = welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
+        
+        await sock.sendMessage(groupId, {
+          text: randomWelcome,
+          mentions: [newMember]
+        });
+      }
+    } catch (e) { 
+      console.error('welcome error:', e.message); 
+    }
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
