@@ -1,703 +1,516 @@
 'use strict';
 
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  isJidBroadcast,
-  makeCacheableSignalKeyStore,
-  Browsers,
-} = require('@whiskeysockets/baileys');
-
-const { Boom } = require('@hapi/boom');
-const pino = require('pino');
+const venom = require('venom-bot');
 const fs = require('fs');
 const path = require('path');
 
-const entertainment   = require('./commands/entertainment');
-const admin           = require('./commands/admin');
-const media           = require('./commands/media');
-const voices          = require('./commands/voices');
-const system          = require('./commands/system');
-const extras          = require('./commands/extras');
-const { randomEmoji } = require('./utils');
-
-const OWNER_NUMBER = '201027028446';
-const AUTH_FOLDER  = path.join(__dirname, 'auth_info');
-const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
-const MAX_SUB_BOTS = 4;
-
-const logger = pino({ level: 'silent' });
-
-// ─── إسكات ضجيج Baileys الداخلي تماماً ────────────────────────────────────
-const NOISE = ['Closing session', 'Closing open session', 'SessionEntry', 'registrationId',
-               'currentRatchet', 'ephemeralKeyPair', 'lastRemoteEphemeralKey', 'indexInfo',
-               'pendingPreKey', '_chains', 'baseKey', 'rootKey', 'privKey', 'pubKey'];
-const _origWrite = process.stdout.write.bind(process.stdout);
-process.stdout.write = (chunk, ...rest) => {
-  const s = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
-  if (NOISE.some(n => s.includes(n))) return true;
-  return _origWrite(chunk, ...rest);
-};
-const _origLog = console.log;
-console.log = (...args) => {
-  const s = String(args[0] ?? '');
-  if (NOISE.some(n => s.includes(n))) return;
-  _origLog(...args);
-};
-
-// ─── حالة البوت ───────────────────────────────────────────────────────────
-let botEnabled      = true;
-let currentMainSock = null;
-let pairingRequested = false;
-
-// ─── Sub-bot sessions ─────────────────────────────────────────────────────
-const subBotSockets = new Map();
+const OWNER_NUMBER = '201110302392';
+const SESSION_FOLDER = path.join(__dirname, 'sessions');
 
 // ─── متغيرات الإحصاءات ──────────────────────────────────────────────────
-const userStats = new Map(); // { 'number@': { messages: 0, lastMsg: Date } }
-const groupStats = new Map(); // { 'groupid@': { members: {}, totalMsgs: 0 } }
+const userStats = new Map();
+const groupStats = new Map();
+let botEnabled = true;
 
-// ─── معالجة الرسائل المشتركة ──────────────────────────────────────────────
-async function handleMessage(sock, msg, isSubBot = false) {
-  try {
-    if (!msg.message) return;
-    if (isJidBroadcast(msg.key.remoteJid)) return;
-
-    const from   = msg.key.remoteJid;
-    const isGrp  = from?.endsWith('@g.us');
-    const sender = isGrp ? msg.key.participant : msg.key.remoteJid;
-    const isOwner = msg.key.fromMe === true;
-    const body   =
-      msg.message?.conversation ||
-      msg.message?.extendedTextMessage?.text ||
-      msg.message?.imageMessage?.caption     ||
-      msg.message?.videoMessage?.caption     || '';
-
-    // ── تحديث الإحصاءات ──────────────────────────────────────────────────
-    if (sender && !msg.key.fromMe) {
-      // تحديث إحصائيات المستخدم
-      if (!userStats.has(sender)) {
-        userStats.set(sender, { messages: 0, lastMsg: Date.now() });
-      }
-      const userStat = userStats.get(sender);
-      userStat.messages += 1;
-      userStat.lastMsg = Date.now();
-      userStats.set(sender, userStat);
-
-      // تحديث إحصائيات المجموعة
-      if (isGrp) {
-        if (!groupStats.has(from)) {
-          groupStats.set(from, { members: {}, totalMsgs: 0 });
-        }
-        const groupStat = groupStats.get(from);
-        if (!groupStat.members[sender]) {
-          groupStat.members[sender] = 0;
-        }
-        groupStat.members[sender] += 1;
-        groupStat.totalMsgs += 1;
-        groupStats.set(from, groupStat);
-      }
-    }
-
-    // ── فحص منع الروابط ──────────────────────────────────────────────────
-    if (!msg.key.fromMe && isGrp) {
-      await admin.checkAntiLink(sock, msg, from, sender);
-    }
-
-    // ── لو البوت موقوف — الأونر بس يقدر يشغّله تاني ─────────────────────
-    if (!botEnabled && !isOwner) return;
-
-    // ── ردود الكلمات التلقائية ────────────────────────────────────────────
-    if (body && !body.startsWith('.') && !msg.key.fromMe) {
-      const norm  = body.replace(/[أإآ]/g, 'ا').trim();
-      const words = norm.split(/\s+/);
-      const pick  = (arr) => arr[Math.floor(Math.random() * arr.length)];
-
-      // احا — يبعت صوت aha.m4a
-      if (norm.includes('احا')) {
-        await sock.sendMessage(from, {
-          audio: { url: './assets/aha.m4a' },
-          mimetype: 'audio/mp4',
-          ptt: true
-        }, { quoted: msg });
-        return;
-      }
-
-      // اصحي — يبعت صوت ashahi.m4a
-      if (norm.includes('اصحي')) {
-        await sock.sendMessage(from, {
-          audio: { url: './assets/ashahi.m4a' },
-          mimetype: 'audio/mp4',
-          ptt: true
-        }, { quoted: msg });
-        return;
-      }
-
-      // خخخ — خخ أو أكتر
-      if (norm.includes('خخ')) {
-        await sock.sendMessage(from, {
-          text: `خوخ وفاكهة سوق العبور اشخر ع قدك يعرص🐦`,
-        }, { quoted: msg });
-        return;
-      }
-
-      // وه — الكلمة لوحدها أو في جملة
-      if (words.includes('وه')) {
-        await sock.sendMessage(from, {
-          text: pick([`صدمة مش كده😂🎀`, `حياتي بقت احسن بكتير😂🌚`]),
-        }, { quoted: msg });
-        return;
-      }
-
-      // يسطا — الكلمة في أي مكان في الجملة
-      if (norm.includes('يسطا')) {
-        await sock.sendMessage(from, {
-          text: pick([`اي يسطا🌚🫶🏻`, `قلب الاسطي😂🫶🏻`, `يسطا خدتك ع البسطه😂🫶🏻`]),
-        }, { quoted: msg });
-        return;
-      }
-
-      await extras.checkQuizAnswer(sock, from, body);
-      return;
-    }
-
-    if (!body.startsWith('.')) return;
-
-    const parts   = body.trim().split(/\s+/);
-    const command = parts[0].toLowerCase();
-    const ctx     = { sock, msg, from, sender, args: parts, isGroup: isGrp,
-                      ownerNumber: OWNER_NUMBER, isOwner, body };
-
-    console.log(`[${isSubBot ? 'SUB' : 'BOT'}] ${sender?.split('@')[0]} → ${command}`);
-
-    switch (command) {
-
-      // ═══════════════════════════════════════════════════════════════════
-      // ══ قائمة الأوامر الشيك ═══════════════════════════════════════════
-      // ═══════════════════════════════════════════════════════════════════
-      case '.اوامر': {
-        const buttons = [
-          { buttonId: 'cmd_娱乐', buttonText: { displayText: '🎮 ترفيه' }, type: 1 },
-          { buttonId: 'cmd_admin', buttonText: { displayText: '🛡️ أدمن' }, type: 1 },
-          { buttonId: 'cmd_media', buttonText: { displayText: '📹 ميديا' }, type: 1 },
-          { buttonId: 'cmd_voices', buttonText: { displayText: '🔊 أصوات' }, type: 1 },
-          { buttonId: 'cmd_system', buttonText: { displayText: '⚙️ نظام' }, type: 1 },
-          { buttonId: 'cmd_stats', buttonText: { displayText: '📊 إحصاءات' }, type: 1 },
-          { buttonId: 'cmd_fun', buttonText: { displayText: '😂 ترول' }, type: 1 },
-          { buttonId: 'cmd_interact', buttonText: { displayText: '💬 تفاعل' }, type: 1 },
-        ];
-
-        await sock.sendMessage(from, {
-          text: `📋 *قائمة أوامر ايرن بوت*\n\n` +
-                `👆 اضغط على الزر عشان تشوف الأوامر\n` +
-                `📌 *ملحوظة:* كل الأوامر بتبدأ بـ *.*\n` +
-                `🐦 *صنع بحب*`,
-          buttons: buttons,
-          headerType: 1
-        }, { quoted: msg });
-        break;
-      }
-
-      // ══ ترفيه ════════════════════════════════════════════════════════════
-      case '.جوزني':   await entertainment.marry(ctx);                   break;
-      case '.جمالي':   await entertainment.beautyRate(ctx, 'جمالك');     break;
-      case '.انوثتي':  await entertainment.beautyRate(ctx, 'انوثتك');    break;
-      case '.رجولتي':  await entertainment.beautyRate(ctx, 'رجولتك');    break;
-      case '.حب':      await entertainment.loveRate(ctx);                break;
-      case '.بروفايل': await entertainment.profile(ctx);                 break;
-      case '.طقملي':   await entertainment.couplePic(ctx);               break;
-
-      // ══ أدمن ═════════════════════════════════════════════════════════════
-      case '.انطر':    await admin.kick(ctx);                            break;
-      case '.رفاعي':   await admin.promote(ctx);                         break;
-      case '.شدفيه':   await admin.demote(ctx);                          break;
-      case '.هنرش':    if (parts[1]==='مياه')  await admin.closeGroup(ctx); break;
-      case '.افتح':    if (parts[1]==='يبني')  await admin.openGroup(ctx);  break;
-      case '.منع':     if (parts[1]==='روابط') await admin.antiLink(ctx);   break;
-      case '.روابط':   if (parts[1]==='ايقاف') await admin.antiLinkOff(ctx); break;
-      case '.منشن':
-      case '.منشنز':   await extras.mentionAll(ctx);                     break;
-      case '.حذف':     await extras.deleteMsg(ctx);                      break;
-      case '.انذار':
-      case '.تحذير':   await extras.warn(ctx);                           break;
-      case '.الانذارات': await extras.warnList(ctx);                     break;
-      case '.حذف_انذار': await extras.warnDelete(ctx);                   break;
-      case '.جروب_اسم':  await extras.changeGroupName(ctx);              break;
-      case '.جروب_وصف':  await extras.changeGroupDesc(ctx);              break;
-
-      // ══ ميديا ════════════════════════════════════════════════════════════
-      case '.شغل':     await media.playYouTube(ctx);                     break;
-      case '.تيكتوك':  await media.downloadTikTok(ctx);                  break;
-      case '.انستا':   await media.downloadInstagram(ctx);               break;
-      case '.لصوت':    await extras.toMp3(ctx);                          break;
-      case '.لجيف':    await extras.toGif(ctx);                          break;
-      case '.لصوره':   await extras.toImage(ctx);                        break;
-      case '.نسخ':     await extras.ocr(ctx);                            break;
-
-      // ══ أصوات ════════════════════════════════════════════════════════════
-      case '.سمكة':    await voices.playAudio(ctx, 'samaka.mp3');        break;
-      case '.بورعي':   await voices.playAudio(ctx, 'bora3i.mp3');        break;
-      case '.ايرن':    await voices.playAudio(ctx, 'eren.mp3');          break;
-
-      // ══ نظام ═════════════════════════════════════════════════════════════
-      case '.قائمة':   await system.helpMenu(ctx);                       break;
-      case '.انا':     if (parts[1]==='ايرن') await system.erenVoice(ctx); break;
-      
-      // ══ أمر تست المعدل ════════════════════════════════════════════════
-      case '.تست': {
-        const testMessages = [
-          `شغال يسطا والله 🐦`,
-          `ماشي يسطا حاضر🐦`,
-          `يعم احا ما قولت شغال🙂`
-        ];
-        
-        const randomTestMsg = testMessages[Math.floor(Math.random() * testMessages.length)];
-        
-        if (isOwner) {
-          await sock.sendMessage(from, {
-            audio: { url: './assets/aha.m4a' },
-            mimetype: 'audio/mp4',
-            ptt: true
-          }, { quoted: msg });
-          
-          setTimeout(async () => {
-            await sock.sendMessage(from, {
-              text: randomTestMsg
-            }, { quoted: msg });
-          }, 1000);
-        } 
-        else {
-          await sock.sendMessage(from, {
-            text: randomTestMsg
-          }, { quoted: msg });
-        }
-        break;
-      }
-      
-      case '.بنج':     await extras.ping(ctx);                           break;
-      case '.مسابقه':  await extras.quiz(ctx);                           break;
-
-      // ═══════════════════════════════════════════════════════════════════
-      // ══ أوامر جديدة ═══════════════════════════════════════════════════
-      // ═══════════════════════════════════════════════════════════════════
-
-      // ─── ترول ──────────────────────────────────────────────────────────
-      case '.ترول': {
-        const trolls = [
-          `@${sender.split('@')[0]} وشك عامل زي البطيخه 🍉😂`,
-          `@${sender.split('@')[0]} انت فاكر نفسك مين يا عرص 🐦`,
-          `@${sender.split('@')[0]} لو انت حلو كنت جبت سيرتك😂`,
-          `@${sender.split('@')[0]} يابو وش الكلب 🐕`,
-          `@${sender.split('@')[0]} ربنا يخليك للطزازة😂`,
-          `@${sender.split('@')[0]} انت جامد بس في النوم😴`,
-          `@${sender.split('@')[0]} شكلك عامل زي الفراخ🍗`,
-          `@${sender.split('@')[0]} انت عارف انك وحش؟ لا طبعاً 🤣`,
-          `@${sender.split('@')[0]} ضحكتني بجد 😂😂`,
-          `@${sender.split('@')[0]} ياريتني مكانك عشان اضحك 😂`
-        ];
-        const random = trolls[Math.floor(Math.random() * trolls.length)];
-        await sock.sendMessage(from, {
-          text: random,
-          mentions: [sender]
-        }, { quoted: msg });
-        break;
-      }
-
-      // ─── مزاجي ──────────────────────────────────────────────────────────
-      case '.مزاجي': {
-        const moods = [
-          `مزاجك النهارده 🍃 *هادي* زي البحر الهاديء 🌊`,
-          `مزاجك النهارده 🔥 *مضروب* زي العندل 😂`,
-          `مزاجك النهارده 😊 *فرحان* زي العصفور 🐦`,
-          `مزاجك النهارده 😔 *زعلان* شوية بس هتعدي 🌈`,
-          `مزاجك النهارده 🤩 *جامد فشخ* كمل كده 💪`,
-          `مزاجك النهارده 🥱 *نعسان* روح نام 😴`,
-          `مزاجك النهارده 🤯 *تايه* محتاج تركز 🧠`,
-          `مزاجك النهارده 💀 *ميت* من الضحك 🤣`
-        ];
-        const random = moods[Math.floor(Math.random() * moods.length)];
-        await sock.sendMessage(from, {
-          text: `🌤️ *مزاجك النهارده*\n\n${random}`
-        }, { quoted: msg });
-        break;
-      }
-
-      // ─── مين انا ──────────────────────────────────────────────────────
-      case '.مين_انا': {
-        const number = sender.split('@')[0];
-        const isUserOwner = number === OWNER_NUMBER;
-        const userStat = userStats.get(sender);
-        const msgCount = userStat ? userStat.messages : 0;
-        
-        let info = `📋 *معلومات حسابك*\n\n`;
-        info += `📱 *رقمك:* +${number}\n`;
-        info += `👑 *الحالة:* ${isUserOwner ? 'الأونر 👑' : 'عضو عادي'}\n`;
-        info += `💬 *عدد رسائلك:* ${msgCount} رسالة\n`;
-        info += `🕐 *آخر رسالة:* ${userStat ? new Date(userStat.lastMsg).toLocaleTimeString('ar') : 'مفيش'}\n`;
-        info += `\n🐦 *ايرن بوت*`;
-
-        await sock.sendMessage(from, {
-          text: info
-        }, { quoted: msg });
-        break;
-      }
-
-      // ─── اعضاء ────────────────────────────────────────────────────────
-      case '.اعضاء': {
-        if (!isGrp) {
-          await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
-          break;
-        }
-        try {
-          const metadata = await sock.groupMetadata(from);
-          const members = metadata.participants;
-          const admins = members.filter(p => p.admin === 'admin' || p.admin === 'superadmin');
-          const owner = members.find(p => p.admin === 'superadmin');
-          
-          await sock.sendMessage(from, {
-            text: `📊 *إحصاءات المجموعة*\n\n` +
-                  `👥 *الأعضاء:* ${members.length}\n` +
-                  `👑 *المشرفين:* ${admins.length}\n` +
-                  `🔒 *الأونر:* ${owner ? `@${owner.id.split('@')[0]}` : 'مش معروف'}\n` +
-                  `📝 *اسم المجموعة:* ${metadata.subject}\n` +
-                  `📅 *تاريخ الإنشاء:* ${new Date(metadata.creation * 1000).toLocaleDateString('ar')}`,
-            mentions: owner ? [owner.id] : []
-          }, { quoted: msg });
-        } catch (e) {
-          await sock.sendMessage(from, { text: `❌ فشل: ${e.message}` }, { quoted: msg });
-        }
-        break;
-      }
-
-      // ─── الادمنية ─────────────────────────────────────────────────────
-      case '.الادمنية': {
-        if (!isGrp) {
-          await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
-          break;
-        }
-        try {
-          const metadata = await sock.groupMetadata(from);
-          const admins = metadata.participants.filter(p => p.admin === 'admin' || p.admin === 'superadmin');
-          
-          if (admins.length === 0) {
-            await sock.sendMessage(from, { text: `📊 مفيش مشرفين في المجموعة` }, { quoted: msg });
-            break;
-          }
-          
-          let adminList = `👑 *المشرفين (${admins.length})*\n\n`;
-          admins.forEach((p, i) => {
-            const role = p.admin === 'superadmin' ? '👑 أونر' : '🛡️ مشرف';
-            adminList += `${i+1}. @${p.id.split('@')[0]} - ${role}\n`;
-          });
-          
-          await sock.sendMessage(from, {
-            text: adminList,
-            mentions: admins.map(p => p.id)
-          }, { quoted: msg });
-        } catch (e) {
-          await sock.sendMessage(from, { text: `❌ فشل: ${e.message}` }, { quoted: msg });
-        }
-        break;
-      }
-
-      // ─── بوت_معلومات ──────────────────────────────────────────────────
-      case '.بوت_معلومات': {
-        const subCount = subBotSockets.size;
-        const info = `🤖 *معلومات ايرن بوت*\n\n` +
-                     `📱 *الأونر:* +${OWNER_NUMBER}\n` +
-                     `🔄 *الإصدار:* 2.0.0\n` +
-                     `📊 *البوتات الفرعية:* ${subCount}/${MAX_SUB_BOTS}\n` +
-                     `✅ *الحالة:* ${botEnabled ? '🟢 شغال' : '🔴 موقوف'}\n` +
-                     `📅 *تاريخ التشغيل:* ${new Date().toLocaleDateString('ar')}\n` +
-                     `\n🐦 *صنع بحب*`;
-        await sock.sendMessage(from, {
-          text: info
-        }, { quoted: msg });
-        break;
-      }
-
-      // ─── اونر ──────────────────────────────────────────────────────────
-      case '.اونر': {
-        await sock.sendMessage(from, {
-          text: `👑 *أونر البوت*\n\n📞 +${OWNER_NUMBER}\n\n🐦 *تواصل معاه لو محتاج حاجة*`
-        }, { quoted: msg });
-        break;
-      }
-
-      // ─── توب ───────────────────────────────────────────────────────────
-      case '.توب': {
-        if (!isGrp) {
-          await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
-          break;
-        }
-        try {
-          const groupStat = groupStats.get(from);
-          if (!groupStat || Object.keys(groupStat.members).length === 0) {
-            await sock.sendMessage(from, { text: `📊 مفيش بيانات كافية للمجموعة` }, { quoted: msg });
-            break;
-          }
-
-          const sorted = Object.entries(groupStat.members)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5);
-
-          let topList = `🏆 *أجمد 5 أعضاء*\n\n`;
-          sorted.forEach(([user, count], i) => {
-            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
-            topList += `${medal} @${user.split('@')[0]} - ${count} رسالة\n`;
-          });
-
-          await sock.sendMessage(from, {
-            text: topList,
-            mentions: sorted.map(s => s[0])
-          }, { quoted: msg });
-        } catch (e) {
-          await sock.sendMessage(from, { text: `❌ فشل: ${e.message}` }, { quoted: msg });
-        }
-        break;
-      }
-
-      // ─── رتبتي ─────────────────────────────────────────────────────────
-      case '.رتبتي': {
-        if (!isGrp) {
-          await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
-          break;
-        }
-        try {
-          const groupStat = groupStats.get(from);
-          if (!groupStat || !groupStat.members[sender]) {
-            await sock.sendMessage(from, { 
-              text: `📊 مفيش رسائل ليك في المجموعة دي\nاكتب عشان تظهر في الترتيب 🐦`
-            }, { quoted: msg });
-            break;
-          }
-
-          const sorted = Object.entries(groupStat.members)
-            .sort((a, b) => b[1] - a[1]);
-          
-          const rank = sorted.findIndex(([user]) => user === sender) + 1;
-          const total = sorted.length;
-          const myMsgs = groupStat.members[sender];
-
-          await sock.sendMessage(from, {
-            text: `📊 *ترتيبك في المجموعة*\n\n` +
-                  `👤 *انت:* @${sender.split('@')[0]}\n` +
-                  `🏆 *ترتيبك:* #${rank} من ${total}\n` +
-                  `💬 *رسائلك:* ${myMsgs} رسالة\n` +
-                  `📈 *نسبة التفاعل:* ${Math.round((myMsgs / groupStat.totalMsgs) * 100)}%`,
-            mentions: [sender]
-          }, { quoted: msg });
-        } catch (e) {
-          await sock.sendMessage(from, { text: `❌ فشل: ${e.message}` }, { quoted: msg });
-        }
-        break;
-      }
-
-      // ─── رسائلي ────────────────────────────────────────────────────────
-      case '.رسائلي': {
-        const userStat = userStats.get(sender);
-        const count = userStat ? userStat.messages : 0;
-        await sock.sendMessage(from, {
-          text: `💬 *رسائلك*\n\n📊 عدد رسائلك الكلي: *${count}* رسالة\n🐦 *استمر*`
-        }, { quoted: msg });
-        break;
-      }
-
-      // ─── تفاعل ─────────────────────────────────────────────────────────
-      case '.تفاعل': {
-        if (!isGrp) {
-          await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
-          break;
-        }
-        try {
-          const groupStat = groupStats.get(from);
-          if (!groupStat || !groupStat.members[sender]) {
-            await sock.sendMessage(from, { 
-              text: `📊 مفيش رسائل ليك في المجموعة دي`
-            }, { quoted: msg });
-            break;
-          }
-
-          const myMsgs = groupStat.members[sender];
-          const totalMsgs = groupStat.totalMsgs;
-          const percentage = Math.round((myMsgs / totalMsgs) * 100);
-
-          let emoji = '😴';
-          let status = 'محتاج تشتغل على نفسك';
-          if (percentage > 30) { emoji = '🔥'; status = 'جامد فشخ!'; }
-          else if (percentage > 20) { emoji = '💪'; status = 'كويس!'; }
-          else if (percentage > 10) { emoji = '👍'; status = 'ماشي حالك'; }
-
-          await sock.sendMessage(from, {
-            text: `📊 *نسبة تفاعلك*\n\n` +
-                  `👤 @${sender.split('@')[0]}\n` +
-                  `📈 نسبة التفاعل: *${percentage}%*\n` +
-                  `${emoji} *${status}*\n` +
-                  `💬 ${myMsgs} رسالة من ${totalMsgs}`,
-            mentions: [sender]
-          }, { quoted: msg });
-        } catch (e) {
-          await sock.sendMessage(from, { text: `❌ فشل: ${e.message}` }, { quoted: msg });
-        }
-        break;
-      }
-
-      // ══ تشغيل / إيقاف / رفرش ════════════════════════════════════════════
-      case '.رفرش': {
-        if (!isOwner) {
-          await sock.sendMessage(from, { text: `❌ الأمر ده للأونر بس` }, { quoted: msg });
-          break;
-        }
-        botEnabled = true;
-        await sock.sendMessage(from, {
-          text: `🔄 *جاري إعادة الاتصال...*\nثواني وهيرجع يشتغل ✅`,
-        }, { quoted: msg });
-        setTimeout(() => {
-          try { currentMainSock?.end(new Error('manual_refresh')); } catch {}
-        }, 1500);
-        break;
-      }
-
-      case '.بور_اوف': {
-        if (!isOwner) {
-          await sock.sendMessage(from, { text: `❌ الأمر ده للأونر بس` }, { quoted: msg });
-          break;
-        }
-        botEnabled = false;
-        await sock.sendMessage(from, {
-          text: `⛔ *البوت اتوقف*\n\nمش هيرد على أي حد دلوقتي\nاكتب *.رفرش* عشان يرجع يشتغل`,
-        }, { quoted: msg });
-        break;
-      }
-
-      // ══ ربط البوت الفرعي ═════════════════════════════════════════════════
-      case '.a7a': {
-        if (isGrp) {
-          await sock.sendMessage(from, {
-            text: `📱 ابعت الأمر ده في المحادثة الخاصة مع البوت عشان يولّد كود ربط لرقمك`,
-          }, { quoted: msg });
-          break;
-        }
-
-        const phone = from.split('@')[0];
-
-        if (isOwner) {
-          const list = [...subBotSockets.keys()];
-          await sock.sendMessage(from, {
-            text: `📊 *البوتات الفرعية:* ${list.length}/${MAX_SUB_BOTS}\n\n` +
-                  (list.length === 0 ? '_مفيش بوتات فرعية مربوطة_'
-                    : list.map((p, i) => `${i+1}. +${p} ✅`).join('\n')),
-          }, { quoted: msg });
-          break;
-        }
-
-        if (subBotSockets.size >= MAX_SUB_BOTS) {
-          await sock.sendMessage(from, {
-            text: `❌ الحد الأقصى للبوتات الفرعية (${MAX_SUB_BOTS}) اتوصل\nتواصل مع الأونر 🔒`,
-          }, { quoted: msg });
-          break;
-        }
-
-        if (subBotSockets.has(phone)) {
-          await sock.sendMessage(from, {
-            text: `⚠️ رقمك +${phone} مربوط بالفعل كبوت فرعي! 🐦`,
-          }, { quoted: msg });
-          break;
-        }
-
-        await sock.sendMessage(from, {
-          text: `⏳ بنجهّز كود ربط واتساب لرقمك *+${phone}*...\nثواني بس!`,
-        }, { quoted: msg });
-
-        try {
-          const subSock = await startSubBotSession(phone);
-          await new Promise(r => setTimeout(r, 3000));
-          const rawCode = await subSock.requestPairingCode(phone);
-          const display = String(rawCode).replace(/(.{4})/g, '$1-').slice(0, -1);
-
-          await sock.sendMessage(from, {
-            text:
-              `╔══════════════════════╗\n` +
-              `║  🔑 *كود ربط واتساب حقيقي*  ║\n` +
-              `╠══════════════════════╣\n` +
-              `║       *${display}*       ║\n` +
-              `╚══════════════════════╝\n\n` +
-              `📱 *خطوات الربط:*\n` +
-              `1️⃣ افتح واتساب على موبايلك\n` +
-              `2️⃣ الإعدادات ← الأجهزة المرتبطة\n` +
-              `3️⃣ اضغط *ربط جهاز*\n` +
-              `4️⃣ اضغط *ربط برقم الهاتف*\n` +
-              `5️⃣ أدخل الكود: *${display}*\n\n` +
-              `📊 البوتات الفرعية: ${subBotSockets.size}/${MAX_SUB_BOTS}`,
-          }, { quoted: msg });
-
-        } catch (err) {
-          const subDir = path.join(SUB_BOTS_DIR, phone);
-          if (fs.existsSync(subDir)) fs.rmSync(subDir, { recursive: true, force: true });
-          subBotSockets.delete(phone);
-          await sock.sendMessage(from, {
-            text: `❌ فشل توليد الكود: ${err.message}\nحاول تاني بعد شوية`,
-          }, { quoted: msg });
-        }
-        break;
-      }
-
-      // ══ شيل بوت فرعي ════════════════════════════════════════════════════
-      case '.شيل_بوت': {
-        if (!isOwner) {
-          await sock.sendMessage(from, { text: `❌ الأمر ده للأونر بس` }, { quoted: msg });
-          break;
-        }
-        const list2 = [...subBotSockets.keys()];
-        if (list2.length === 0) {
-          await sock.sendMessage(from, { text: `📊 مفيش بوتات فرعية مربوطة حالياً` }, { quoted: msg });
-          break;
-        }
-
-        const numArg = parts[1];
-        let target = null;
-        if (numArg) {
-          const idx = parseInt(numArg) - 1;
-          if (!isNaN(idx) && list2[idx]) target = list2[idx];
-          else target = list2.find(p => p === numArg || p.includes(numArg));
-        }
-
-        if (!target) {
-          await sock.sendMessage(from, {
-            text: `📋 *البوتات الفرعية:*\n\n${list2.map((p,i)=>`${i+1}. +${p}`).join('\n')}\n\nاكتب: *.شيل_بوت [رقم]* زي: .شيل_بوت 1`,
-          }, { quoted: msg });
-          break;
-        }
-
-        try { subBotSockets.get(target)?.end(); } catch {}
-        subBotSockets.delete(target);
-        const subDir2 = path.join(SUB_BOTS_DIR, target);
-        if (fs.existsSync(subDir2)) fs.rmSync(subDir2, { recursive: true, force: true });
-
-        await sock.sendMessage(from, {
-          text: `✅ تم شيل البوت الفرعي +${target}\n📊 البوتات الفرعية: ${subBotSockets.size}/${MAX_SUB_BOTS}`,
-        }, { quoted: msg });
-        break;
-      }
-
-      default: break;
-    }
-  } catch (e) { console.error('msg error:', e.message); }
+// ─── إنشاء مجلد الجلسات ────────────────────────────────────────────────
+if (!fs.existsSync(SESSION_FOLDER)) {
+  fs.mkdirSync(SESSION_FOLDER, { recursive: true });
 }
 
-// ─── بدء جلسة بوت فرعي ───────────────────────────────────────────────────
-async function startSubBotSession(phone) {
-  const dir = path.join(SUB_BOTS_DIR, phone);
-  fs.mkdirSync(dir, { recursive: true });
+// ─── بدء البوت ──────────────────────────────────────────────────────────
+console.log('╔═══════════════════════════════════╗');
+console.log('║       🤖  ايرن بوت (Venom)       ║');
+console.log(`║  📞  ${OWNER_NUMBER}   ║`);
+console.log('╚═══════════════════════════════════╝');
 
-  const { state, saveCreds } = await useMultiFileAuthState(dir);
-  const { version }          = await fetchLatestBaileysVersion();
+venom
+  .create({
+    session: 'eren-bot',
+    multidevice: true,
+    folderNameToken: SESSION_FOLDER,
+    headless: true,
+    browserArgs: ['--no-sandbox', '--disable-setuid-sandbox'],
+    
+    // ─── طريقة الربط بـ 8 حروف ──────────────────────────────────────
+    // هنخلي البوت يستنى الكود من المستخدم بدل QR
+    catchQR: (qrCode, asciiQR) => {
+      // مش هنعمل حاجة بالـ QR، هنستنى الكود
+      console.log('⏳ جاري انتظار كود الربط من واتساب...');
+    },
+    
+    // لما واتساب يطلب الكود، هنبعته للمستخدم
+    statusFind: (statusSession, session) => {
+      console.log('📱 حالة الجلسة:', statusSession);
+    }
+  })
+  .then((client) => startBot(client))
+  .catch((error) => {
+    console.error('❌ فشل بدء البوت:', error);
+    setTimeout(() => process.exit(1), 3000);
+  });
 
-  const subSock = makeWASocket({
-    version, logger,
-    browser: Browsers.ubuntu('Chrome'),
-    auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
-    printQRInTerminal: false,
-    markOnlineOnConnect
+// ─── تشغيل البوت ────────────────────────────────────────────────────────
+function startBot(client) {
+  console.log('✅ البوت متصل!');
+
+  // ── تحديث الإحصاءات ──────────────────────────────────────────────────
+  client.onMessage(async (message) => {
+    try {
+      const from = message.from;
+      const sender = message.author || message.from;
+      const isGrp = message.isGroupMsg;
+      const isOwner = sender === OWNER_NUMBER + '@c.us';
+      const body = message.body || '';
+
+      // تحديث الإحصاءات
+      if (sender && !message.isMe) {
+        if (!userStats.has(sender)) {
+          userStats.set(sender, { messages: 0, lastMsg: Date.now() });
+        }
+        const userStat = userStats.get(sender);
+        userStat.messages += 1;
+        userStat.lastMsg = Date.now();
+        userStats.set(sender, userStat);
+
+        if (isGrp) {
+          if (!groupStats.has(from)) {
+            groupStats.set(from, { members: {}, totalMsgs: 0 });
+          }
+          const groupStat = groupStats.get(from);
+          if (!groupStat.members[sender]) {
+            groupStat.members[sender] = 0;
+          }
+          groupStat.members[sender] += 1;
+          groupStat.totalMsgs += 1;
+          groupStats.set(from, groupStat);
+        }
+      }
+
+      // لو البوت موقوف
+      if (!botEnabled && !isOwner) return;
+
+      // ── ردود الكلمات التلقائية ──────────────────────────────────────
+      if (body && !body.startsWith('.') && !message.isMe) {
+        const norm = body.replace(/[أإآ]/g, 'ا').trim();
+        const words = norm.split(/\s+/);
+        const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+        if (norm.includes('احا')) {
+          await client.sendAudio(from, './assets/aha.m4a', { ptt: true });
+          return;
+        }
+
+        if (norm.includes('خخ')) {
+          await client.sendText(from, 'خوخ وفاكهة سوق العبور اشخر ع قدك يعرص🐦');
+          return;
+        }
+
+        if (norm.includes('يسطا')) {
+          await client.sendText(from, pick([
+            'اي يسطا🌚🫶🏻',
+            'قلب الاسطي😂🫶🏻',
+            'يسطا خدتك ع البسطه😂🫶🏻'
+          ]));
+          return;
+        }
+      }
+
+      if (!body.startsWith('.')) return;
+
+      const parts = body.trim().split(/\s+/);
+      const command = parts[0].toLowerCase();
+      const senderNumber = sender.split('@')[0];
+
+      console.log(`[BOT] ${senderNumber} → ${command}`);
+
+      // ── أوامر البوت ──────────────────────────────────────────────────
+      switch (command) {
+
+        // ══ قائمة الأوامر ═══════════════════════════════════════════════
+        case '.اوامر': {
+          const helpText = `📋 *قائمة أوامر ايرن بوت*\n\n` +
+            `🎮 *ترفيه*\n` +
+            `.جوزني .جمالي .انوثتي .رجولتي .حب .بروفايل .طقملي\n\n` +
+            `🛡️ *أدمن*\n` +
+            `.انطر .رفاعي .شدفيه .منشن .حذف\n` +
+            `.انذار .الانذارات .حذف_انذار .جروب_اسم .جروب_وصف\n\n` +
+            `🔊 *أصوات*\n` +
+            `.سمكة .بورعي .ايرن\n\n` +
+            `⚙️ *نظام*\n` +
+            `.تست .بنج .رفرش .بور_اوف\n\n` +
+            `😂 *ترول*\n` +
+            `.ترول\n\n` +
+            `💬 *تفاعل*\n` +
+            `.مزاجي\n\n` +
+            `📊 *إحصاءات*\n` +
+            `.اعضاء .الادمنية .بوت_معلومات .اونر\n` +
+            `.توب .رتبتي .رسائلي .تفاعل .مين_انا\n\n` +
+            `🐦 *صنع بحب*`;
+
+          await client.sendText(from, helpText);
+          break;
+        }
+
+        // ══ أمر الربط بـ 8 حروف ════════════════════════════════════════
+        case '.ربط': {
+          if (isGrp) {
+            await client.sendText(from, '📱 ابعت الأمر ده في الخاص عشان تاخد كود الربط');
+            break;
+          }
+
+          // نتأكد إن الرقم مش مربوط قبل كده
+          // (هتحتاج تعمل نظام لتخزين البوتات الفرعية زي ما كان في Baileys)
+
+          await client.sendText(from, 
+            `🔐 *جاري تجهيز كود الربط...*\n\n` +
+            `📱 *خطوات الربط:*\n` +
+            `1️⃣ افتح واتساب على موبايلك\n` +
+            `2️⃣ الإعدادات ← الأجهزة المرتبطة\n` +
+            `3️⃣ اضغط *ربط جهاز*\n` +
+            `4️⃣ اختار *ربط برقم الهاتف*\n` +
+            `5️⃣ استنى الكود هيجيلك خلال ثواني\n\n` +
+            `⏳ *بنطلب الكود من واتساب...*`
+          );
+
+          try {
+            // في Venom، الكود بيظهر في console تلقائياً
+            // هنستخدم حدث عشان ناخد الكود ونبعته للمستخدم
+            const qrCode = await client.getPairingCode(sender);
+            
+            // الكود اللي رجع هو كود 8 حروف حقيقي
+            await client.sendText(from,
+              `╔══════════════════════════╗\n` +
+              `║  🔑 *كود الربط*          ║\n` +
+              `╠══════════════════════════╣\n` +
+              `║     *${qrCode}*           ║\n` +
+              `╚══════════════════════════╝\n\n` +
+              `📱 *ادخل الكود ده في واتساب*\n` +
+              `⏳ *صلاحية الكود 5 دقايق*\n\n` +
+              `✅ بعد ما تدخل الكود، هيجيلك تأكيد إن البوت اتضاف`
+            );
+
+          } catch (err) {
+            await client.sendText(from, `❌ فشل توليد الكود: ${err.message}`);
+          }
+          break;
+        }
+
+        // ══ تست ════════════════════════════════════════════════════════
+        case '.تست': {
+          const testMessages = [
+            `شغال يسطا والله 🐦`,
+            `ماشي يسطا حاضر🐦`,
+            `يعم احا ما قولت شغال🙂`
+          ];
+          const randomMsg = testMessages[Math.floor(Math.random() * testMessages.length)];
+
+          if (isOwner) {
+            await client.sendAudio(from, './assets/aha.m4a', { ptt: true });
+            setTimeout(async () => {
+              await client.sendText(from, randomMsg);
+            }, 1500);
+          } else {
+            await client.sendText(from, randomMsg);
+          }
+          break;
+        }
+
+        // ══ ترول ════════════════════════════════════════════════════════
+        case '.ترول': {
+          const trolls = [
+            `@${senderNumber} وشك عامل زي البطيخه 🍉😂`,
+            `@${senderNumber} انت فاكر نفسك مين يا عرص 🐦`,
+            `@${senderNumber} شكلك عامل زي الفراخ🍗`,
+            `@${senderNumber} ضحكتني بجد 😂😂`
+          ];
+          const random = trolls[Math.floor(Math.random() * trolls.length)];
+          await client.sendText(from, random);
+          break;
+        }
+
+        // ══ مزاجي ═══════════════════════════════════════════════════════
+        case '.مزاجي': {
+          const moods = [
+            `🍃 *هادي* زي البحر الهاديء 🌊`,
+            `🔥 *مضروب* زي العندل 😂`,
+            `😊 *فرحان* زي العصفور 🐦`,
+            `🤩 *جامد فشخ* كمل كده 💪`,
+            `🥱 *نعسان* روح نام 😴`
+          ];
+          const random = moods[Math.floor(Math.random() * moods.length)];
+          await client.sendText(from, `🌤️ *مزاجك النهارده*\n\n${random}`);
+          break;
+        }
+
+        // ══ مين انا ════════════════════════════════════════════════════
+        case '.مين_انا': {
+          const userStat = userStats.get(sender);
+          const msgCount = userStat ? userStat.messages : 0;
+
+          let info = `📋 *معلومات حسابك*\n\n`;
+          info += `📱 *رقمك:* +${senderNumber}\n`;
+          info += `👑 *الحالة:* ${isOwner ? 'الأونر 👑' : 'عضو عادي'}\n`;
+          info += `💬 *عدد رسائلك:* ${msgCount} رسالة\n`;
+          info += `\n🐦 *ايرن بوت*`;
+
+          await client.sendText(from, info);
+          break;
+        }
+
+        // ══ اعضاء ══════════════════════════════════════════════════════
+        case '.اعضاء': {
+          if (!isGrp) {
+            await client.sendText(from, '❌ الأمر ده في الجروبات بس');
+            break;
+          }
+          try {
+            const group = await client.getGroupInfo(from);
+            const members = group.participants || [];
+            const admins = members.filter(p => p.isAdmin || p.isSuperAdmin);
+
+            await client.sendText(from,
+              `📊 *إحصاءات المجموعة*\n\n` +
+              `👥 *الأعضاء:* ${members.length}\n` +
+              `👑 *المشرفين:* ${admins.length}\n` +
+              `📝 *اسم المجموعة:* ${group.name}`
+            );
+          } catch (e) {
+            await client.sendText(from, `❌ فشل: ${e.message}`);
+          }
+          break;
+        }
+
+        // ══ الادمنية ════════════════════════════════════════════════════
+        case '.الادمنية': {
+          if (!isGrp) {
+            await client.sendText(from, '❌ الأمر ده في الجروبات بس');
+            break;
+          }
+          try {
+            const group = await client.getGroupInfo(from);
+            const admins = group.participants.filter(p => p.isAdmin || p.isSuperAdmin);
+
+            if (admins.length === 0) {
+              await client.sendText(from, '📊 مفيش مشرفين في المجموعة');
+              break;
+            }
+
+            let adminList = `👑 *المشرفين (${admins.length})*\n\n`;
+            admins.forEach((p, i) => {
+              const role = p.isSuperAdmin ? '👑 أونر' : '🛡️ مشرف';
+              const num = p.id.split('@')[0];
+              adminList += `${i+1}. ${num} - ${role}\n`;
+            });
+
+            await client.sendText(from, adminList);
+          } catch (e) {
+            await client.sendText(from, `❌ فشل: ${e.message}`);
+          }
+          break;
+        }
+
+        // ══ بوت_معلومات ════════════════════════════════════════════════
+        case '.بوت_معلومات': {
+          const info = `🤖 *معلومات ايرن بوت*\n\n` +
+                       `📱 *الأونر:* +${OWNER_NUMBER}\n` +
+                       `🔄 *الإصدار:* 3.0.0 (Venom)\n` +
+                       `✅ *الحالة:* ${botEnabled ? '🟢 شغال' : '🔴 موقوف'}\n` +
+                       `\n🐦 *صنع بحب*`;
+          await client.sendText(from, info);
+          break;
+        }
+
+        // ══ اونر ════════════════════════════════════════════════════════
+        case '.اونر': {
+          await client.sendText(from, `👑 *أونر البوت*\n\n📞 +${OWNER_NUMBER}\n\n🐦 *تواصل معاه لو محتاج حاجة*`);
+          break;
+        }
+
+        // ══ توب ════════════════════════════════════════════════════════
+        case '.توب': {
+          if (!isGrp) {
+            await client.sendText(from, '❌ الأمر ده في الجروبات بس');
+            break;
+          }
+          try {
+            const groupStat = groupStats.get(from);
+            if (!groupStat || Object.keys(groupStat.members).length === 0) {
+              await client.sendText(from, '📊 مفيش بيانات كافية للمجموعة');
+              break;
+            }
+
+            const sorted = Object.entries(groupStat.members)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 5);
+
+            let topList = `🏆 *أجمد 5 أعضاء*\n\n`;
+            sorted.forEach(([user, count], i) => {
+              const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+              const userNum = user.split('@')[0];
+              topList += `${medal} ${userNum} - ${count} رسالة\n`;
+            });
+
+            await client.sendText(from, topList);
+          } catch (e) {
+            await client.sendText(from, `❌ فشل: ${e.message}`);
+          }
+          break;
+        }
+
+        // ══ رتبتي ══════════════════════════════════════════════════════
+        case '.رتبتي': {
+          if (!isGrp) {
+            await client.sendText(from, '❌ الأمر ده في الجروبات بس');
+            break;
+          }
+          try {
+            const groupStat = groupStats.get(from);
+            if (!groupStat || !groupStat.members[sender]) {
+              await client.sendText(from, '📊 مفيش رسائل ليك في المجموعة دي');
+              break;
+            }
+
+            const sorted = Object.entries(groupStat.members)
+              .sort((a, b) => b[1] - a[1]);
+
+            const rank = sorted.findIndex(([user]) => user === sender) + 1;
+            const total = sorted.length;
+            const myMsgs = groupStat.members[sender];
+
+            await client.sendText(from,
+              `📊 *ترتيبك في المجموعة*\n\n` +
+              `👤 *انت:* ${senderNumber}\n` +
+              `🏆 *ترتيبك:* #${rank} من ${total}\n` +
+              `💬 *رسائلك:* ${myMsgs} رسالة`
+            );
+          } catch (e) {
+            await client.sendText(from, `❌ فشل: ${e.message}`);
+          }
+          break;
+        }
+
+        // ══ رسائلي ═════════════════════════════════════════════════════
+        case '.رسائلي': {
+          const userStat = userStats.get(sender);
+          const count = userStat ? userStat.messages : 0;
+          await client.sendText(from, `💬 *رسائلك*\n\n📊 عدد رسائلك الكلي: *${count}* رسالة 🐦`);
+          break;
+        }
+
+        // ══ تفاعل ══════════════════════════════════════════════════════
+        case '.تفاعل': {
+          if (!isGrp) {
+            await client.sendText(from, '❌ الأمر ده في الجروبات بس');
+            break;
+          }
+          try {
+            const groupStat = groupStats.get(from);
+            if (!groupStat || !groupStat.members[sender]) {
+              await client.sendText(from, '📊 مفيش رسائل ليك في المجموعة دي');
+              break;
+            }
+
+            const myMsgs = groupStat.members[sender];
+            const totalMsgs = groupStat.totalMsgs;
+            const percentage = Math.round((myMsgs / totalMsgs) * 100);
+
+            let emoji = '😴';
+            let status = 'محتاج تشتغل على نفسك';
+            if (percentage > 30) { emoji = '🔥'; status = 'جامد فشخ!'; }
+            else if (percentage > 20) { emoji = '💪'; status = 'كويس!'; }
+            else if (percentage > 10) { emoji = '👍'; status = 'ماشي حالك'; }
+
+            await client.sendText(from,
+              `📊 *نسبة تفاعلك*\n\n` +
+              `👤 ${senderNumber}\n` +
+              `📈 نسبة التفاعل: *${percentage}%*\n` +
+              `${emoji} *${status}*\n` +
+              `💬 ${myMsgs} رسالة من ${totalMsgs}`
+            );
+          } catch (e) {
+            await client.sendText(from, `❌ فشل: ${e.message}`);
+          }
+          break;
+        }
+
+        // ══ رفرش ═══════════════════════════════════════════════════════
+        case '.رفرش': {
+          if (!isOwner) {
+            await client.sendText(from, '❌ الأمر ده للأونر بس');
+            break;
+          }
+          botEnabled = true;
+          await client.sendText(from, '🔄 *جاري إعادة الاتصال...*\nثواني وهيرجع يشتغل ✅');
+          break;
+        }
+
+        // ══ بور_اوف ════════════════════════════════════════════════════
+        case '.بور_اوف': {
+          if (!isOwner) {
+            await client.sendText(from, '❌ الأمر ده للأونر بس');
+            break;
+          }
+          botEnabled = false;
+          await client.sendText(from, '⛔ *البوت اتوقف*\n\nمش هيرد على أي حد دلوقتي\nاكتب *.رفرش* عشان يرجع يشتغل');
+          break;
+        }
+
+        // ═══ أصوات ═════════════════════════════════════════════════════
+        case '.سمكة': {
+          await client.sendAudio(from, './assets/samaka.mp3', { ptt: true });
+          break;
+        }
+        case '.بورعي': {
+          await client.sendAudio(from, './assets/bora3i.mp3', { ptt: true });
+          break;
+        }
+        case '.ايرن': {
+          await client.sendAudio(from, './assets/eren.mp3', { ptt: true });
+          break;
+        }
+
+        // ═══ بينج ══════════════════════════════════════════════════════
+        case '.بنج': {
+          const start = Date.now();
+          await client.sendText(from, '🏓 *جاري حساب البينج...*');
+          const end = Date.now();
+          await client.sendText(from, `🏓 *البينج:* ${end - start}ms`);
+          break;
+        }
+
+        default: {
+          await client.sendText(from, `❌ الأمر *${command}* مش موجود\n\n📋 اكتب *.اوامر* عشان تشوف القائمة كاملة`);
+          break;
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ خطأ:', error.message);
+    }
+  });
+
+  // ── حدث دخول عضو جديد ──────────────────────────────────────────────────
+  client.onGroupParticipantChange(async (event) => {
+    try {
+      if (event.action === 'add') {
+        const groupId = event.groupId;
+        const newMember = event.participants[0];
+        const groupInfo = await client.getGroupInfo(groupId);
+        const groupName = groupInfo.name || 'المجموعة';
+
+        const welcomeMessages = [
+          `منور البار يقلبي 🐦 @${newMember.split('@')[0]}`,
+          `شير البار يقلب اخوك 🐦 @${newMember.split('@')[0]}`,
+          `اهلاً بك في ${groupName} يا @${newMember.split('@')[0]} 🐦`
+        ];
+
+        const randomWelcome = welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
+        await client.sendText(groupId, randomWelcome);
+      }
+    } catch (error) {
+      console.error('❌ خطأ في الترحيب:', error.message);
+    }
+  });
+
+  console.log('🤖 البوت جاهز لاستقبال الأوامر!');
+                                  }
