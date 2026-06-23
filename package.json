@@ -1,20 +1,14 @@
 {
-  "name": "whatsapp-bot",
+  "name": "eren-bot",
   "version": "1.0.0",
-  "description": "WhatsApp Bot using Baileys",
+  "description": "ايرن بوت",
   "main": "index.js",
-  "private": true,
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@distube/ytdl-core": "^4.16.12",
+    "@whiskeysockets/baileys": "6.7.7",
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^6.7.18",
-    "axios": "^1.16.0",
-    "baileys": "7.0.0-rc13",
-    "form-data": "^4.0.5",
-    "pino": "^9.7.0",
-    "play-dl": "^1.9.7"
+    "pino": "^8.17.2"
   }
 }
