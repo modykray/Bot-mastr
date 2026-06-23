@@ -23,7 +23,7 @@ const system          = require('./commands/system');
 const extras          = require('./commands/extras');
 const { randomEmoji } = require('./utils');
 
-const OWNER_NUMBER = '201027028446';
+const OWNER_NUMBER = '201110302392';
 const AUTH_FOLDER  = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const MAX_SUB_BOTS = 4;
@@ -188,7 +188,40 @@ async function handleMessage(sock, msg, isSubBot = false) {
       // ══ نظام ═════════════════════════════════════════════════════════════
       case '.قائمة':   await system.helpMenu(ctx);                       break;
       case '.انا':     if (parts[1]==='ايرن') await system.erenVoice(ctx); break;
-      case '.تست':     await sock.sendMessage(from, { text: `الو حول هل تسمعني 😂` }, { quoted: msg }); break;
+      
+      // ══ أمر تست المعدل ════════════════════════════════════════════════
+      case '.تست': {
+        const testMessages = [
+          `شغال يسطا والله 🐦`,
+          `ماشي يسطا حاضر🐦`,
+          `يعم احا ما قولت شغال🙂`
+        ];
+        
+        const randomTestMsg = testMessages[Math.floor(Math.random() * testMessages.length)];
+        
+        // لو الأونر - يبعت صوت A7A.m4a + رسالة عشوائية
+        if (isOwner) {
+          await sock.sendMessage(from, {
+            audio: { url: './assets/A7A.m4a' },
+            mimetype: 'audio/mp4',
+            ptt: true
+          }, { quoted: msg });
+          
+          setTimeout(async () => {
+            await sock.sendMessage(from, {
+              text: randomTestMsg
+            }, { quoted: msg });
+          }, 1000);
+        } 
+        // لو مش أونر - يبعت رسالة عشوائية بس
+        else {
+          await sock.sendMessage(from, {
+            text: randomTestMsg
+          }, { quoted: msg });
+        }
+        break;
+      }
+      
       case '.بنج':     await extras.ping(ctx);                           break;
       case '.مسابقه':  await extras.quiz(ctx);                           break;
 
@@ -460,6 +493,7 @@ async function startBot() {
     }
   });
 
+  // ─── حدث دخول عضو جديد مع رابط المجموعة ──────────────────────────────
   sock.ev.on('group-participants.update', async (update) => {
     try {
       if (update.action === 'add') {
@@ -467,14 +501,24 @@ async function startBot() {
         const groupId = update.id;
         
         let groupName = 'المجموعة';
+        let groupLink = '';
+        
         try {
           const groupMetadata = await sock.groupMetadata(groupId);
           groupName = groupMetadata.subject || 'المجموعة';
+          
+          // محاولة جلب رابط المجموعة
+          try {
+            const code = await sock.groupInviteCode(groupId);
+            groupLink = `https://chat.whatsapp.com/${code}`;
+          } catch (e) {
+            groupLink = '';
+          }
         } catch (e) {}
 
         const welcomeMessages = [
           `منور البار يقلبي 🐦 @${newMember.split('@')[0]}`,
-          `شير البار يقلب اخوك 🐦 @${newMember.split('@')[0]}`,
+          `شير البار يقلب اخوك 🐦 @${newMember.split('@')[0]}\n${groupLink ? `رابط المجموعة: ${groupLink}` : ''}`,
           `اهلاً بك في ${groupName} يا @${newMember.split('@')[0]} 🐦`,
           `نورت الدنيا يا @${newMember.split('@')[0]} 🐦`,
           `فرحتنا بيك يا @${newMember.split('@')[0]} 🐦`,
