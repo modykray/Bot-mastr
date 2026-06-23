@@ -23,7 +23,7 @@ const system          = require('./commands/system');
 const extras          = require('./commands/extras');
 const { randomEmoji } = require('./utils');
 
-const OWNER_NUMBER = '201110302392';
+const OWNER_NUMBER = '201027028446';
 const AUTH_FOLDER  = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const MAX_SUB_BOTS = 4;
@@ -55,6 +55,10 @@ let pairingRequested = false;
 // ─── Sub-bot sessions ─────────────────────────────────────────────────────
 const subBotSockets = new Map();
 
+// ─── متغيرات الإحصاءات ──────────────────────────────────────────────────
+const userStats = new Map(); // { 'number@': { messages: 0, lastMsg: Date } }
+const groupStats = new Map(); // { 'groupid@': { members: {}, totalMsgs: 0 } }
+
 // ─── معالجة الرسائل المشتركة ──────────────────────────────────────────────
 async function handleMessage(sock, msg, isSubBot = false) {
   try {
@@ -70,6 +74,32 @@ async function handleMessage(sock, msg, isSubBot = false) {
       msg.message?.extendedTextMessage?.text ||
       msg.message?.imageMessage?.caption     ||
       msg.message?.videoMessage?.caption     || '';
+
+    // ── تحديث الإحصاءات ──────────────────────────────────────────────────
+    if (sender && !msg.key.fromMe) {
+      // تحديث إحصائيات المستخدم
+      if (!userStats.has(sender)) {
+        userStats.set(sender, { messages: 0, lastMsg: Date.now() });
+      }
+      const userStat = userStats.get(sender);
+      userStat.messages += 1;
+      userStat.lastMsg = Date.now();
+      userStats.set(sender, userStat);
+
+      // تحديث إحصائيات المجموعة
+      if (isGrp) {
+        if (!groupStats.has(from)) {
+          groupStats.set(from, { members: {}, totalMsgs: 0 });
+        }
+        const groupStat = groupStats.get(from);
+        if (!groupStat.members[sender]) {
+          groupStat.members[sender] = 0;
+        }
+        groupStat.members[sender] += 1;
+        groupStat.totalMsgs += 1;
+        groupStats.set(from, groupStat);
+      }
+    }
 
     // ── فحص منع الروابط ──────────────────────────────────────────────────
     if (!msg.key.fromMe && isGrp) {
@@ -144,6 +174,32 @@ async function handleMessage(sock, msg, isSubBot = false) {
 
     switch (command) {
 
+      // ═══════════════════════════════════════════════════════════════════
+      // ══ قائمة الأوامر الشيك ═══════════════════════════════════════════
+      // ═══════════════════════════════════════════════════════════════════
+      case '.اوامر': {
+        const buttons = [
+          { buttonId: 'cmd_娱乐', buttonText: { displayText: '🎮 ترفيه' }, type: 1 },
+          { buttonId: 'cmd_admin', buttonText: { displayText: '🛡️ أدمن' }, type: 1 },
+          { buttonId: 'cmd_media', buttonText: { displayText: '📹 ميديا' }, type: 1 },
+          { buttonId: 'cmd_voices', buttonText: { displayText: '🔊 أصوات' }, type: 1 },
+          { buttonId: 'cmd_system', buttonText: { displayText: '⚙️ نظام' }, type: 1 },
+          { buttonId: 'cmd_stats', buttonText: { displayText: '📊 إحصاءات' }, type: 1 },
+          { buttonId: 'cmd_fun', buttonText: { displayText: '😂 ترول' }, type: 1 },
+          { buttonId: 'cmd_interact', buttonText: { displayText: '💬 تفاعل' }, type: 1 },
+        ];
+
+        await sock.sendMessage(from, {
+          text: `📋 *قائمة أوامر ايرن بوت*\n\n` +
+                `👆 اضغط على الزر عشان تشوف الأوامر\n` +
+                `📌 *ملحوظة:* كل الأوامر بتبدأ بـ *.*\n` +
+                `🐦 *صنع بحب*`,
+          buttons: buttons,
+          headerType: 1
+        }, { quoted: msg });
+        break;
+      }
+
       // ══ ترفيه ════════════════════════════════════════════════════════════
       case '.جوزني':   await entertainment.marry(ctx);                   break;
       case '.جمالي':   await entertainment.beautyRate(ctx, 'جمالك');     break;
@@ -199,10 +255,9 @@ async function handleMessage(sock, msg, isSubBot = false) {
         
         const randomTestMsg = testMessages[Math.floor(Math.random() * testMessages.length)];
         
-        // لو الأونر - يبعت صوت A7A.m4a + رسالة عشوائية
         if (isOwner) {
           await sock.sendMessage(from, {
-            audio: { url: './assets/A7A.m4a' },
+            audio: { url: './assets/aha.m4a' },
             mimetype: 'audio/mp4',
             ptt: true
           }, { quoted: msg });
@@ -213,7 +268,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
             }, { quoted: msg });
           }, 1000);
         } 
-        // لو مش أونر - يبعت رسالة عشوائية بس
         else {
           await sock.sendMessage(from, {
             text: randomTestMsg
@@ -224,6 +278,271 @@ async function handleMessage(sock, msg, isSubBot = false) {
       
       case '.بنج':     await extras.ping(ctx);                           break;
       case '.مسابقه':  await extras.quiz(ctx);                           break;
+
+      // ═══════════════════════════════════════════════════════════════════
+      // ══ أوامر جديدة ═══════════════════════════════════════════════════
+      // ═══════════════════════════════════════════════════════════════════
+
+      // ─── ترول ──────────────────────────────────────────────────────────
+      case '.ترول': {
+        const trolls = [
+          `@${sender.split('@')[0]} وشك عامل زي البطيخه 🍉😂`,
+          `@${sender.split('@')[0]} انت فاكر نفسك مين يا عرص 🐦`,
+          `@${sender.split('@')[0]} لو انت حلو كنت جبت سيرتك😂`,
+          `@${sender.split('@')[0]} يابو وش الكلب 🐕`,
+          `@${sender.split('@')[0]} ربنا يخليك للطزازة😂`,
+          `@${sender.split('@')[0]} انت جامد بس في النوم😴`,
+          `@${sender.split('@')[0]} شكلك عامل زي الفراخ🍗`,
+          `@${sender.split('@')[0]} انت عارف انك وحش؟ لا طبعاً 🤣`,
+          `@${sender.split('@')[0]} ضحكتني بجد 😂😂`,
+          `@${sender.split('@')[0]} ياريتني مكانك عشان اضحك 😂`
+        ];
+        const random = trolls[Math.floor(Math.random() * trolls.length)];
+        await sock.sendMessage(from, {
+          text: random,
+          mentions: [sender]
+        }, { quoted: msg });
+        break;
+      }
+
+      // ─── مزاجي ──────────────────────────────────────────────────────────
+      case '.مزاجي': {
+        const moods = [
+          `مزاجك النهارده 🍃 *هادي* زي البحر الهاديء 🌊`,
+          `مزاجك النهارده 🔥 *مضروب* زي العندل 😂`,
+          `مزاجك النهارده 😊 *فرحان* زي العصفور 🐦`,
+          `مزاجك النهارده 😔 *زعلان* شوية بس هتعدي 🌈`,
+          `مزاجك النهارده 🤩 *جامد فشخ* كمل كده 💪`,
+          `مزاجك النهارده 🥱 *نعسان* روح نام 😴`,
+          `مزاجك النهارده 🤯 *تايه* محتاج تركز 🧠`,
+          `مزاجك النهارده 💀 *ميت* من الضحك 🤣`
+        ];
+        const random = moods[Math.floor(Math.random() * moods.length)];
+        await sock.sendMessage(from, {
+          text: `🌤️ *مزاجك النهارده*\n\n${random}`
+        }, { quoted: msg });
+        break;
+      }
+
+      // ─── مين انا ──────────────────────────────────────────────────────
+      case '.مين_انا': {
+        const number = sender.split('@')[0];
+        const isUserOwner = number === OWNER_NUMBER;
+        const userStat = userStats.get(sender);
+        const msgCount = userStat ? userStat.messages : 0;
+        
+        let info = `📋 *معلومات حسابك*\n\n`;
+        info += `📱 *رقمك:* +${number}\n`;
+        info += `👑 *الحالة:* ${isUserOwner ? 'الأونر 👑' : 'عضو عادي'}\n`;
+        info += `💬 *عدد رسائلك:* ${msgCount} رسالة\n`;
+        info += `🕐 *آخر رسالة:* ${userStat ? new Date(userStat.lastMsg).toLocaleTimeString('ar') : 'مفيش'}\n`;
+        info += `\n🐦 *ايرن بوت*`;
+
+        await sock.sendMessage(from, {
+          text: info
+        }, { quoted: msg });
+        break;
+      }
+
+      // ─── اعضاء ────────────────────────────────────────────────────────
+      case '.اعضاء': {
+        if (!isGrp) {
+          await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
+          break;
+        }
+        try {
+          const metadata = await sock.groupMetadata(from);
+          const members = metadata.participants;
+          const admins = members.filter(p => p.admin === 'admin' || p.admin === 'superadmin');
+          const owner = members.find(p => p.admin === 'superadmin');
+          
+          await sock.sendMessage(from, {
+            text: `📊 *إحصاءات المجموعة*\n\n` +
+                  `👥 *الأعضاء:* ${members.length}\n` +
+                  `👑 *المشرفين:* ${admins.length}\n` +
+                  `🔒 *الأونر:* ${owner ? `@${owner.id.split('@')[0]}` : 'مش معروف'}\n` +
+                  `📝 *اسم المجموعة:* ${metadata.subject}\n` +
+                  `📅 *تاريخ الإنشاء:* ${new Date(metadata.creation * 1000).toLocaleDateString('ar')}`,
+            mentions: owner ? [owner.id] : []
+          }, { quoted: msg });
+        } catch (e) {
+          await sock.sendMessage(from, { text: `❌ فشل: ${e.message}` }, { quoted: msg });
+        }
+        break;
+      }
+
+      // ─── الادمنية ─────────────────────────────────────────────────────
+      case '.الادمنية': {
+        if (!isGrp) {
+          await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
+          break;
+        }
+        try {
+          const metadata = await sock.groupMetadata(from);
+          const admins = metadata.participants.filter(p => p.admin === 'admin' || p.admin === 'superadmin');
+          
+          if (admins.length === 0) {
+            await sock.sendMessage(from, { text: `📊 مفيش مشرفين في المجموعة` }, { quoted: msg });
+            break;
+          }
+          
+          let adminList = `👑 *المشرفين (${admins.length})*\n\n`;
+          admins.forEach((p, i) => {
+            const role = p.admin === 'superadmin' ? '👑 أونر' : '🛡️ مشرف';
+            adminList += `${i+1}. @${p.id.split('@')[0]} - ${role}\n`;
+          });
+          
+          await sock.sendMessage(from, {
+            text: adminList,
+            mentions: admins.map(p => p.id)
+          }, { quoted: msg });
+        } catch (e) {
+          await sock.sendMessage(from, { text: `❌ فشل: ${e.message}` }, { quoted: msg });
+        }
+        break;
+      }
+
+      // ─── بوت_معلومات ──────────────────────────────────────────────────
+      case '.بوت_معلومات': {
+        const subCount = subBotSockets.size;
+        const info = `🤖 *معلومات ايرن بوت*\n\n` +
+                     `📱 *الأونر:* +${OWNER_NUMBER}\n` +
+                     `🔄 *الإصدار:* 2.0.0\n` +
+                     `📊 *البوتات الفرعية:* ${subCount}/${MAX_SUB_BOTS}\n` +
+                     `✅ *الحالة:* ${botEnabled ? '🟢 شغال' : '🔴 موقوف'}\n` +
+                     `📅 *تاريخ التشغيل:* ${new Date().toLocaleDateString('ar')}\n` +
+                     `\n🐦 *صنع بحب*`;
+        await sock.sendMessage(from, {
+          text: info
+        }, { quoted: msg });
+        break;
+      }
+
+      // ─── اونر ──────────────────────────────────────────────────────────
+      case '.اونر': {
+        await sock.sendMessage(from, {
+          text: `👑 *أونر البوت*\n\n📞 +${OWNER_NUMBER}\n\n🐦 *تواصل معاه لو محتاج حاجة*`
+        }, { quoted: msg });
+        break;
+      }
+
+      // ─── توب ───────────────────────────────────────────────────────────
+      case '.توب': {
+        if (!isGrp) {
+          await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
+          break;
+        }
+        try {
+          const groupStat = groupStats.get(from);
+          if (!groupStat || Object.keys(groupStat.members).length === 0) {
+            await sock.sendMessage(from, { text: `📊 مفيش بيانات كافية للمجموعة` }, { quoted: msg });
+            break;
+          }
+
+          const sorted = Object.entries(groupStat.members)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5);
+
+          let topList = `🏆 *أجمد 5 أعضاء*\n\n`;
+          sorted.forEach(([user, count], i) => {
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+            topList += `${medal} @${user.split('@')[0]} - ${count} رسالة\n`;
+          });
+
+          await sock.sendMessage(from, {
+            text: topList,
+            mentions: sorted.map(s => s[0])
+          }, { quoted: msg });
+        } catch (e) {
+          await sock.sendMessage(from, { text: `❌ فشل: ${e.message}` }, { quoted: msg });
+        }
+        break;
+      }
+
+      // ─── رتبتي ─────────────────────────────────────────────────────────
+      case '.رتبتي': {
+        if (!isGrp) {
+          await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
+          break;
+        }
+        try {
+          const groupStat = groupStats.get(from);
+          if (!groupStat || !groupStat.members[sender]) {
+            await sock.sendMessage(from, { 
+              text: `📊 مفيش رسائل ليك في المجموعة دي\nاكتب عشان تظهر في الترتيب 🐦`
+            }, { quoted: msg });
+            break;
+          }
+
+          const sorted = Object.entries(groupStat.members)
+            .sort((a, b) => b[1] - a[1]);
+          
+          const rank = sorted.findIndex(([user]) => user === sender) + 1;
+          const total = sorted.length;
+          const myMsgs = groupStat.members[sender];
+
+          await sock.sendMessage(from, {
+            text: `📊 *ترتيبك في المجموعة*\n\n` +
+                  `👤 *انت:* @${sender.split('@')[0]}\n` +
+                  `🏆 *ترتيبك:* #${rank} من ${total}\n` +
+                  `💬 *رسائلك:* ${myMsgs} رسالة\n` +
+                  `📈 *نسبة التفاعل:* ${Math.round((myMsgs / groupStat.totalMsgs) * 100)}%`,
+            mentions: [sender]
+          }, { quoted: msg });
+        } catch (e) {
+          await sock.sendMessage(from, { text: `❌ فشل: ${e.message}` }, { quoted: msg });
+        }
+        break;
+      }
+
+      // ─── رسائلي ────────────────────────────────────────────────────────
+      case '.رسائلي': {
+        const userStat = userStats.get(sender);
+        const count = userStat ? userStat.messages : 0;
+        await sock.sendMessage(from, {
+          text: `💬 *رسائلك*\n\n📊 عدد رسائلك الكلي: *${count}* رسالة\n🐦 *استمر*`
+        }, { quoted: msg });
+        break;
+      }
+
+      // ─── تفاعل ─────────────────────────────────────────────────────────
+      case '.تفاعل': {
+        if (!isGrp) {
+          await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
+          break;
+        }
+        try {
+          const groupStat = groupStats.get(from);
+          if (!groupStat || !groupStat.members[sender]) {
+            await sock.sendMessage(from, { 
+              text: `📊 مفيش رسائل ليك في المجموعة دي`
+            }, { quoted: msg });
+            break;
+          }
+
+          const myMsgs = groupStat.members[sender];
+          const totalMsgs = groupStat.totalMsgs;
+          const percentage = Math.round((myMsgs / totalMsgs) * 100);
+
+          let emoji = '😴';
+          let status = 'محتاج تشتغل على نفسك';
+          if (percentage > 30) { emoji = '🔥'; status = 'جامد فشخ!'; }
+          else if (percentage > 20) { emoji = '💪'; status = 'كويس!'; }
+          else if (percentage > 10) { emoji = '👍'; status = 'ماشي حالك'; }
+
+          await sock.sendMessage(from, {
+            text: `📊 *نسبة تفاعلك*\n\n` +
+                  `👤 @${sender.split('@')[0]}\n` +
+                  `📈 نسبة التفاعل: *${percentage}%*\n` +
+                  `${emoji} *${status}*\n` +
+                  `💬 ${myMsgs} رسالة من ${totalMsgs}`,
+            mentions: [sender]
+          }, { quoted: msg });
+        } catch (e) {
+          await sock.sendMessage(from, { text: `❌ فشل: ${e.message}` }, { quoted: msg });
+        }
+        break;
+      }
 
       // ══ تشغيل / إيقاف / رفرش ════════════════════════════════════════════
       case '.رفرش': {
@@ -381,174 +700,4 @@ async function startSubBotSession(phone) {
     browser: Browsers.ubuntu('Chrome'),
     auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
     printQRInTerminal: false,
-    markOnlineOnConnect: false,
-    generateHighQualityLinkPreview: false,
-  });
-
-  subSock.ev.on('creds.update', saveCreds);
-
-  subSock.ev.on('connection.update', async ({ connection, lastDisconnect }) => {
-    if (connection === 'open') {
-      console.log(`✅ بوت فرعي متصل: +${phone}`);
-      subBotSockets.set(phone, subSock);
-    } else if (connection === 'close') {
-      const code = new Boom(lastDisconnect?.error)?.output?.statusCode;
-      if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession) {
-        console.log(`⚠️ بوت فرعي +${phone} انتهت جلسته — جاري حذفه`);
-        subBotSockets.delete(phone);
-        const d = path.join(SUB_BOTS_DIR, phone);
-        if (fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true });
-      } else {
-        console.log(`🔄 إعادة اتصال البوت الفرعي +${phone}...`);
-        setTimeout(() => startSubBotSession(phone).catch(console.error), 5000);
-      }
-    }
-  });
-
-  subSock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-    for (const m of messages) await handleMessage(subSock, m, true);
-  });
-
-  subBotSockets.set(phone, subSock);
-  return subSock;
-}
-
-// ─── تحميل البوتات الفرعية ────────────────────────────────────────────────
-async function loadSubBots() {
-  if (!fs.existsSync(SUB_BOTS_DIR)) return;
-  const phones = fs.readdirSync(SUB_BOTS_DIR)
-    .filter(f => fs.statSync(path.join(SUB_BOTS_DIR, f)).isDirectory());
-  if (phones.length) console.log(`📂 تحميل ${phones.length} بوت فرعي محفوظ...`);
-  for (const phone of phones) {
-    await startSubBotSession(phone).catch(e => console.error(`خطأ +${phone}:`, e.message));
-  }
-}
-
-// ─── مسح الجلسة الرئيسية ──────────────────────────────────────────────────
-function clearSession() {
-  if (!fs.existsSync(AUTH_FOLDER)) return;
-  fs.readdirSync(AUTH_FOLDER)
-    .filter(f => f !== 'sub_bots' && f !== 'warnings.json')
-    .forEach(f => fs.rmSync(path.join(AUTH_FOLDER, f), { recursive: true, force: true }));
-}
-
-// ─── البوت الأساسي ────────────────────────────────────────────────────────
-async function startBot() {
-  pairingRequested = false;
-  fs.mkdirSync(AUTH_FOLDER, { recursive: true });
-  fs.mkdirSync(SUB_BOTS_DIR, { recursive: true });
-
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
-  const { version }          = await fetchLatestBaileysVersion();
-
-  console.log(`\n🚀 جاري الاتصال... واتساب: ${version.join('.')}`);
-
-  const sock = makeWASocket({
-    version, logger,
-    browser: Browsers.ubuntu('Chrome'),
-    auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
-    printQRInTerminal: false,
-    markOnlineOnConnect: false,
-    generateHighQualityLinkPreview: false,
-  });
-
-  currentMainSock = sock;
-  sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-    if (qr && !sock.authState.creds.registered && !pairingRequested) {
-      pairingRequested = true;
-      try {
-        const code    = await sock.requestPairingCode(OWNER_NUMBER);
-        const display = String(code).replace(/(.{4})/g, '$1-').slice(0, -1);
-        console.log('\n╔══════════════════════════════════════╗');
-        console.log(`║   🔑  Pairing Code :  ${display.padEnd(12)}  ║`);
-        console.log('╚══════════════════════════════════════╝');
-        console.log(`\n📱 الإعدادات → الأجهزة المرتبطة → ربط جهاز → ربط برقم → ${display}\n`);
-      } catch (err) {
-        console.error('❌ فشل الكود:', err.message);
-        pairingRequested = false;
-      }
-    }
-
-    if (connection === 'open') {
-      pairingRequested = false;
-      botEnabled = true;
-      console.log(`✅ البوت متصل! +${sock.user?.id?.split(':')[0]}`);
-      if (subBotSockets.size === 0) await loadSubBots();
-    }
-
-    if (connection === 'close') {
-      const errCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
-      console.log(`⚠️  انقطع الاتصال (${errCode})`);
-      if (errCode === DisconnectReason.loggedOut || errCode === DisconnectReason.badSession) {
-        console.log('🗑  جلسة تالفة — إعادة البدء...');
-        clearSession();
-        setTimeout(startBot, 3000);
-      } else {
-        console.log('🔄 إعادة الاتصال بعد 5 ثوانٍ...');
-        setTimeout(startBot, 5000);
-      }
-    }
-  });
-
-  // ─── حدث دخول عضو جديد مع رابط المجموعة ──────────────────────────────
-  sock.ev.on('group-participants.update', async (update) => {
-    try {
-      if (update.action === 'add') {
-        const newMember = update.participants[0];
-        const groupId = update.id;
-        
-        let groupName = 'المجموعة';
-        let groupLink = '';
-        
-        try {
-          const groupMetadata = await sock.groupMetadata(groupId);
-          groupName = groupMetadata.subject || 'المجموعة';
-          
-          // محاولة جلب رابط المجموعة
-          try {
-            const code = await sock.groupInviteCode(groupId);
-            groupLink = `https://chat.whatsapp.com/${code}`;
-          } catch (e) {
-            groupLink = '';
-          }
-        } catch (e) {}
-
-        const welcomeMessages = [
-          `منور البار يقلبي 🐦 @${newMember.split('@')[0]}`,
-          `شير البار يقلب اخوك 🐦 @${newMember.split('@')[0]}\n${groupLink ? `رابط المجموعة: ${groupLink}` : ''}`,
-          `اهلاً بك في ${groupName} يا @${newMember.split('@')[0]} 🐦`,
-          `نورت الدنيا يا @${newMember.split('@')[0]} 🐦`,
-          `فرحتنا بيك يا @${newMember.split('@')[0]} 🐦`,
-          `عيش معانا يا @${newMember.split('@')[0]} 🐦`
-        ];
-        
-        const randomWelcome = welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
-        
-        await sock.sendMessage(groupId, {
-          text: randomWelcome,
-          mentions: [newMember]
-        });
-      }
-    } catch (e) { 
-      console.error('welcome error:', e.message); 
-    }
-  });
-
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-    for (const m of messages) await handleMessage(sock, m, false);
-  });
-}
-
-// ─── إقلاع ───────────────────────────────────────────────────────────────
-console.log('╔═══════════════════════════════════╗');
-console.log('║       🤖  ايرن بوت               ║');
-console.log(`║  📞  ${OWNER_NUMBER}   ║`);
-console.log('╚═══════════════════════════════════╝');
-
-startBot().catch(e => { console.error('Fatal:', e.message); setTimeout(startBot, 5000); });
-process.on('uncaughtException',  e => console.error('uncaught:', e.message));
-process.on('unhandledRejection', e => console.error('rejection:', String(e)));
+    markOnlineOnConnect
