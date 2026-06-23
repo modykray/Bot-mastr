@@ -1,12 +1,15 @@
 {
   "name": "eren-bot",
-  "version": "3.0.0",
-  "description": "ايرن بوت - نسخة Venom 🐦",
+  "version": "1.0.0",
+  "description": "ايرن بوت - مع أمر الربط الجديد",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "venom-bot": "4.3.2"
+    "@whiskeysockets/baileys": "^6.7.9",
+    "@hapi/boom": "^10.0.1",
+    "pino": "^8.17.2",
+    "qrcode-terminal": "^0.12.0"
   }
 }
