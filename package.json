@@ -1,12 +1,12 @@
 {
   "name": "eren-bot",
   "version": "3.0.0",
-  "description": "ايرن بوت - نسخة فينوم 🐦",
+  "description": "ايرن بوت - نسخة Venom 🐦",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "venom-bot": "^5.0.0"
+    "venom-bot": "4.3.2"
   }
 }
