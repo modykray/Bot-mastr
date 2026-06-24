@@ -23,7 +23,7 @@ const system          = require('./commands/system');
 const extras          = require('./commands/extras');
 const { randomEmoji } = require('./utils');
 
-const OWNER_NUMBER = '201110302392';
+const OWNER_NUMBER = '201227812859';
 const AUTH_FOLDER  = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const MAX_SUB_BOTS = 4;
@@ -259,7 +259,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
         
         if (isOwner) {
           await sock.sendMessage(from, {
-            audio: { url: './assets/aha.m4a' },
+            audio: { url: './assets/A7A.m4a' },  // ← غيرنا لـ A7A
             mimetype: 'audio/mp4',
             ptt: true
           }, { quoted: msg });
