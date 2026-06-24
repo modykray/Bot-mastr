@@ -252,7 +252,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
 
       // ══ أوامر جديدة ═════════════════════════════════════════════════════
 
-      // ─── ترول ──────────────────────────────────────────────────────────
       case '.ترول': {
         const trolls = [
           `@${sender.split('@')[0]} وشك عامل زي البطيخه 🍉😂`,
@@ -273,7 +272,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         break;
       }
 
-      // ─── مزاجي ──────────────────────────────────────────────────────────
       case '.مزاجي': {
         const moods = [
           `🍃 *هادي* زي البحر الهاديء 🌊`,
@@ -292,7 +290,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         break;
       }
 
-      // ─── مين انا ──────────────────────────────────────────────────────
       case '.مين_انا': {
         const number = sender.split('@')[0];
         const isUserOwner = number === OWNER_NUMBER;
@@ -312,7 +309,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         break;
       }
 
-      // ─── اعضاء ────────────────────────────────────────────────────────
       case '.اعضاء': {
         if (!isGrp) {
           await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
@@ -339,7 +335,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         break;
       }
 
-      // ─── الادمنية ─────────────────────────────────────────────────────
       case '.الادمنية': {
         if (!isGrp) {
           await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
@@ -370,7 +365,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         break;
       }
 
-      // ─── بوت_معلومات ──────────────────────────────────────────────────
       case '.بوت_معلومات': {
         const subCount = subBotSockets.size;
         const info = `🤖 *معلومات ايرن بوت*\n\n` +
@@ -386,7 +380,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         break;
       }
 
-      // ─── اونر ──────────────────────────────────────────────────────────
       case '.اونر': {
         await sock.sendMessage(from, {
           text: `👑 *أونر البوت*\n\n📞 +${OWNER_NUMBER}\n\n🐦 *تواصل معاه لو محتاج حاجة*`
@@ -394,7 +387,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         break;
       }
 
-      // ─── توب ───────────────────────────────────────────────────────────
       case '.توب': {
         if (!isGrp) {
           await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
@@ -427,7 +419,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         break;
       }
 
-      // ─── رتبتي ─────────────────────────────────────────────────────────
       case '.رتبتي': {
         if (!isGrp) {
           await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
@@ -463,7 +454,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         break;
       }
 
-      // ─── رسائلي ────────────────────────────────────────────────────────
       case '.رسائلي': {
         const userStat = userStats.get(sender);
         const count = userStat ? userStat.messages : 0;
@@ -473,7 +463,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
         break;
       }
 
-      // ─── تفاعل ─────────────────────────────────────────────────────────
       case '.تفاعل': {
         if (!isGrp) {
           await sock.sendMessage(from, { text: `❌ الأمر ده في الجروبات بس` }, { quoted: msg });
@@ -744,6 +733,7 @@ async function startBot() {
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+    // ── طلب كود الربط بالأسلوب الأصلي ──────────────────────────────────
     if (qr && !sock.authState.creds.registered && !pairingRequested) {
       pairingRequested = true;
       try {
