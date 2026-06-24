@@ -23,7 +23,7 @@ const system          = require('./commands/system');
 const extras          = require('./commands/extras');
 const { randomEmoji } = require('./utils');
 
-const OWNER_NUMBER = '201227812859';
+const OWNER_NUMBER = '201110302392';
 const AUTH_FOLDER  = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const MAX_SUB_BOTS = 4;
