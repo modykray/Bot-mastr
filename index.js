@@ -246,7 +246,38 @@ async function handleMessage(sock, msg, isSubBot = false) {
       // ══ نظام ═════════════════════════════════════════════════════════════
       case '.قائمة':   await system.helpMenu(ctx);                       break;
       case '.انا':     if (parts[1]==='ايرن') await system.erenVoice(ctx); break;
-      case '.تست':     await sock.sendMessage(from, { text: `الو حول هل تسمعني 😂` }, { quoted: msg }); break;
+
+      // ══ أمر تست المعدل ════════════════════════════════════════════════
+      case '.تست': {
+        const testMessages = [
+          `شغال يسطا والله 🐦`,
+          `ماشي يسطا حاضر🐦`,
+          `يعم احا ما قولت شغال🙂`
+        ];
+        
+        const randomTestMsg = testMessages[Math.floor(Math.random() * testMessages.length)];
+        
+        if (isOwner) {
+          await sock.sendMessage(from, {
+            audio: { url: './assets/aha.m4a' },
+            mimetype: 'audio/mp4',
+            ptt: true
+          }, { quoted: msg });
+          
+          setTimeout(async () => {
+            await sock.sendMessage(from, {
+              text: randomTestMsg
+            }, { quoted: msg });
+          }, 1000);
+        } 
+        else {
+          await sock.sendMessage(from, {
+            text: randomTestMsg
+          }, { quoted: msg });
+        }
+        break;
+      }
+
       case '.بنج':     await extras.ping(ctx);                           break;
       case '.مسابقه':  await extras.quiz(ctx);                           break;
 
