@@ -174,6 +174,15 @@ async function handleMessage(sock, msg, isSubBot = false) {
 
       // ══ قائمة الأوامر الجديدة بالشكل المطلوب ═══════════════════════════════════════════
       case '.اوامر': {
+        // صور عشوائية للقائمة
+        const helpImages = [
+          'https://i.imgur.com/8KmKtVL.jpeg',
+          'https://i.imgur.com/7KmKtVL.jpeg',
+          'https://i.imgur.com/6KmKtVL.jpeg',
+          'https://i.imgur.com/5KmKtVL.jpeg'
+        ];
+        const randomImg = helpImages[Math.floor(Math.random() * helpImages.length)];
+        
         const helpText = 
 `ㅤㅤׄ        (╲︵᷼   ⊹      ⏜✿╱)ㅤㅤ  𝅄ㅤ
  ㅤ               \`𝗂𝗇𝖿𝗈 𝖻𝗈𝗍\` ㅤׅ
@@ -266,7 +275,10 @@ async function handleMessage(sock, msg, isSubBot = false) {
 
  ㅤׄ𐂯◟𝗆𝖺𝖽𝖾 𝖻𝗒 𝗂𝗍𝗌_𝗐𝗁𝗈𝗈𝗈𝗈𝗈𝗈𝗌𝗁`;
 
-        await sock.sendMessage(from, { text: helpText }, { quoted: msg });
+        await sock.sendMessage(from, {
+          image: { url: randomImg },
+          caption: helpText
+        }, { quoted: msg });
         break;
       }
 
@@ -334,7 +346,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
       case '.قائمة':   await system.helpMenu(ctx);                       break;
       case '.انا':     if (parts[1]==='ايرن') await system.erenVoice(ctx); break;
 
-      // ══ أمر تست المعدل ════════════════════════════════════════════════
+      // ══ أمر تست المعدل (مرة واحدة بس) ════════════════════════════════════
       case '.تست': {
         const testMessages = [
           `شغال يسطا والله 🐦`,
@@ -351,6 +363,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
             ptt: true
           }, { quoted: msg });
           
+          // رسالة واحدة بس بعد الصوت
           setTimeout(async () => {
             await sock.sendMessage(from, {
               text: randomTestMsg
@@ -888,7 +901,7 @@ async function startBot() {
     }
   });
 
-  // ─── حدث دخول عضو جديد مع صورة الترحيب ──────────────────────────────
+  // ─── حدث دخول عضو جديد مع رابط المجموعة ──────────────────────────────
   sock.ev.on('group-participants.update', async (update) => {
     try {
       if (update.action === 'add') {
@@ -896,22 +909,24 @@ async function startBot() {
         const groupId = update.id;
         
         let groupName = 'المجموعة';
-        let groupPic = null;
+        let groupLink = '';
         
         try {
           const groupMetadata = await sock.groupMetadata(groupId);
           groupName = groupMetadata.subject || 'المجموعة';
           
-          // محاولة جلب صورة المجموعة
+          // جلب رابط المجموعة
           try {
-            const ppUrl = await sock.profilePictureUrl(groupId, 'image');
-            groupPic = ppUrl;
-          } catch (e) {}
+            const code = await sock.groupInviteCode(groupId);
+            groupLink = `https://chat.whatsapp.com/${code}`;
+          } catch (e) {
+            groupLink = '';
+          }
         } catch (e) {}
 
         const welcomeMessages = [
           `منور البار يقلبي 🐦 @${newMember.split('@')[0]}`,
-          `شير البار يقلب اخوك 🐦 @${newMember.split('@')[0]}`,
+          `شير البار يقلب اخوك 🐦 @${newMember.split('@')[0]}\n${groupLink ? `رابط المجموعة: ${groupLink}` : ''}`,
           `اهلاً بك في ${groupName} يا @${newMember.split('@')[0]} 🐦`,
           `نورت الدنيا يا @${newMember.split('@')[0]} 🐦`,
           `فرحتنا بيك يا @${newMember.split('@')[0]} 🐦`,
@@ -920,19 +935,10 @@ async function startBot() {
         
         const randomWelcome = welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
         
-        // لو في صورة للمجموعة، نبعت الترحيب مع الصورة
-        if (groupPic) {
-          await sock.sendMessage(groupId, {
-            image: { url: groupPic },
-            caption: randomWelcome,
-            mentions: [newMember]
-          });
-        } else {
-          await sock.sendMessage(groupId, {
-            text: randomWelcome,
-            mentions: [newMember]
-          });
-        }
+        await sock.sendMessage(groupId, {
+          text: randomWelcome,
+          mentions: [newMember]
+        });
       }
     } catch (e) { 
       console.error('welcome error:', e.message); 
