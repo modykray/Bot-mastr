@@ -59,6 +59,14 @@ const subBotSockets = new Map();
 const userStats = new Map();
 const groupStats = new Map();
 
+// ─── دالة اختيار استيكر احا عشوائي ─────────────────────────────────────
+const ahaStickers = ['aha1', 'aha2', 'aha3'];
+
+function getRandomAhaSticker() {
+    const randomIndex = Math.floor(Math.random() * ahaStickers.length);
+    return ahaStickers[randomIndex];
+}
+
 // ─── معالجة الرسائل المشتركة ──────────────────────────────────────────────
 async function handleMessage(sock, msg, isSubBot = false) {
   try {
@@ -113,12 +121,11 @@ async function handleMessage(sock, msg, isSubBot = false) {
       const words = norm.split(/\s+/);
       const pick  = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-      // احا — يبعت صوت aha.m4a
+      // ── استيكر احا عشوائي ──────────────────────────────────────────────
       if (norm.includes('احا')) {
+        const stickerName = getRandomAhaSticker();
         await sock.sendMessage(from, {
-          audio: { url: './assets/aha.m4a' },
-          mimetype: 'audio/mp4',
-          ptt: true
+          sticker: { url: `./assets/${stickerName}.webp` }
         }, { quoted: msg });
         return;
       }
