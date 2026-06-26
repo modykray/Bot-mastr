@@ -280,7 +280,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
  ││⸼ ᧔⃘ᦅ ۫ 24/7 𝗈𝗇𝗅𝗂𝗇𝖾 ⦂ 𝗆𝖽 𝖾𝗇𝗀𝗂𝗇𝖾
  ╰───ׅ ဣ  ׁ ⏜⌢꯭⋒ ۫
 
- ㅤׄ𐂯◟𝗆𝖺𝖽𝖾 𝖻𝗒 𝗂𝗍𝗌_𝗐𝗁𝗈𝗈𝗈𝗈𝗈𝗈𝗌𝗁`;
+ ㅤׄ𐂯◟𝗆𝖺𝖽𝖾 𝖻𝗒 𝗂𝗍𝗌_𝗐𝗁𝗈𝗈𝗈𝗈𝗈𝗈𝗈𝗌𝗁`;
 
         await sock.sendMessage(from, {
           image: { url: randomImg },
@@ -908,7 +908,7 @@ async function startBot() {
     }
   });
 
-  // ─── حدث دخول عضو جديد مع رابط المجموعة ──────────────────────────────
+  // ─── حدث دخول عضو جديد مع صوت ترحيب ورابط المجموعة ────────────────────
   sock.ev.on('group-participants.update', async (update) => {
     try {
       if (update.action === 'add') {
@@ -927,23 +927,32 @@ async function startBot() {
             const code = await sock.groupInviteCode(groupId);
             groupLink = `https://chat.whatsapp.com/${code}`;
           } catch (e) {
-            groupLink = '';
+            console.log('مش قادر أجيب رابط المجموعة:', e.message);
           }
-        } catch (e) {}
+        } catch (e) {
+          console.log('مش قادر أجيب معلومات المجموعة:', e.message);
+        }
 
-        const welcomeMessages = [
-          `منور البار يقلبي 🐦 @${newMember.split('@')[0]}`,
-          `شير البار يقلب اخوك 🐦 @${newMember.split('@')[0]}\n${groupLink ? `رابط المجموعة: ${groupLink}` : ''}`,
-          `اهلاً بك في ${groupName} يا @${newMember.split('@')[0]} 🐦`,
-          `نورت الدنيا يا @${newMember.split('@')[0]} 🐦`,
-          `فرحتنا بيك يا @${newMember.split('@')[0]} 🐦`,
-          `عيش معانا يا @${newMember.split('@')[0]} 🐦`
-        ];
-        
-        const randomWelcome = welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
-        
+        // ⚡ أولاً: نبعت صوت الترحيب
+        try {
+          await sock.sendMessage(groupId, {
+            audio: { url: './assets/eren_welcome.mp3' },
+            mimetype: 'audio/mp4',
+            ptt: true
+          });
+        } catch (e) {
+          console.log('صوت الترحيب مش موجود:', e.message);
+        }
+
+        // ⚡ ثانياً: رسالة "منور البار يقلبي" مع منشن
         await sock.sendMessage(groupId, {
-          text: randomWelcome,
+          text: `منور البار يقلبي 🐦 @${newMember.split('@')[0]}`,
+          mentions: [newMember]
+        });
+
+        // ⚡ ثالثاً: رسالة "شير البار يقلبي" مع رابط المجموعة لو موجود
+        await sock.sendMessage(groupId, {
+          text: `شير البار يقلبي 🐦${groupLink ? `\nرابط المجموعة: ${groupLink}` : ''}`,
           mentions: [newMember]
         });
       }
