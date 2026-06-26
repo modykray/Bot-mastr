@@ -59,6 +59,24 @@ const subBotSockets = new Map();
 const userStats = new Map();
 const groupStats = new Map();
 
+// ─── الصور العشوائية للأحداث (10 صور) ────────────────────────────────────
+const randomImages = [
+  'https://i.imgur.com/img1.jpg',
+  'https://i.imgur.com/img2.jpg',
+  'https://i.imgur.com/img3.jpg',
+  'https://i.imgur.com/img4.jpg',
+  'https://i.imgur.com/img5.jpg',
+  'https://i.imgur.com/img6.jpg',
+  'https://i.imgur.com/img7.jpg',
+  'https://i.imgur.com/img8.jpg',
+  'https://i.imgur.com/img9.jpg',
+  'https://i.imgur.com/img10.jpg'
+];
+
+function getRandomImage() {
+  return randomImages[Math.floor(Math.random() * randomImages.length)];
+}
+
 // ─── دالة اختيار استيكر احا عشوائي ─────────────────────────────────────
 const ahaStickers = ['aha1', 'aha2', 'aha3'];
 
@@ -115,11 +133,51 @@ async function handleMessage(sock, msg, isSubBot = false) {
     // ── لو البوت موقوف — الأونر بس يقدر يشغّله تاني ─────────────────────
     if (!botEnabled && !isOwner) return;
 
-    // ── ردود الكلمات التلقائية ────────────────────────────────────────────
+    // ── ردود الكلمات التلقائية (بدون نقطة) ─────────────────────────────────
     if (body && !body.startsWith('.') && !msg.key.fromMe) {
       const norm  = body.replace(/[أإآ]/g, 'ا').trim();
       const words = norm.split(/\s+/);
       const pick  = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+      // ── استيكرات الكلمات المخصصة ──────────────────────────────────────
+      if (/بحبك|حبك|حبق|روحي|قلبي|بعشقك/.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Mhny.webp' } }, { quoted: msg });
+        return;
+      }
+      if (/جبنة|جبان/.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Gbnt.webp' } }, { quoted: msg });
+        return;
+      }
+      if (/بتاعي|زبي|حنكش|ظوبري/.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Hnksh.webp' } }, { quoted: msg });
+        return;
+      }
+      if (/بنت متناكه|ولاد متناكه|ابن متناكه/.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Mtnak.webp' } }, { quoted: msg });
+        return;
+      }
+      if (/استر|متستر|ما تستر/.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Astr.webp' } }, { quoted: msg });
+        return;
+      }
+      if (/كسمك|يكسمك|بكسمك/.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Ksomk.webp' } }, { quoted: msg });
+        return;
+      }
+      if (/كارف|بتكرف|كارفة/.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Karf.webp' } }, { quoted: msg });
+        return;
+      }
+      if (/(?<!\S)يسطا(?!\S)|يا اسطي/.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Ysta.webp' } }, { quoted: msg });
+        return;
+      }
+
+      // ── منشن على المطور ────────────────────────────────────────────────
+      if (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.includes(`${OWNER_NUMBER}@s.whatsapp.net`)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Mnshn.webp' } }, { quoted: msg });
+        return;
+      }
 
       // ── استيكر احا عشوائي ──────────────────────────────────────────────
       if (norm.includes('احا')) {
@@ -181,18 +239,11 @@ async function handleMessage(sock, msg, isSubBot = false) {
 
       // ══ قائمة الأوامر الجديدة بالشكل المطلوب ═══════════════════════════════════════════
       case '.اوامر': {
-        // صور عشوائية للقائمة
-        const helpImages = [
-          'https://i.imgur.com/8KmKtVL.jpeg',
-          'https://i.imgur.com/7KmKtVL.jpeg',
-          'https://i.imgur.com/6KmKtVL.jpeg',
-          'https://i.imgur.com/5KmKtVL.jpeg'
-        ];
-        const randomImg = helpImages[Math.floor(Math.random() * helpImages.length)];
+        const randomImg = getRandomImage();
         
         const helpText = 
 `ㅤㅤׄ        (╲︵᷼   ⊹      ⏜✿╱)ㅤㅤ  𝅄ㅤ
- ㅤ               \`𝗂𝗇𝖿𝗈 𝖻𝗈𝗍\` ㅤׅ
+ ㅤ               \`Erin 𝖻𝗈𝗍\` ㅤׅ
  ׅ    ׂ  ⤹⤹᪲  ۪ 𝗈𝗐𝗇𝖾𝗋 : 201227812859
  ׅ    ׂ  ⤹⤹᪲  ۪ 𝖻𝗈𝗍 : ايرن بوت
  ׅ    ׂ  ⤹⤹᪲  ۪ 𝗌𝗍𝖺𝗍𝗎𝗌 : 𝗈𝗇𝗅𝗂𝗇𝖾 24/7
@@ -304,7 +355,14 @@ async function handleMessage(sock, msg, isSubBot = false) {
       case '.شدفيه':   await admin.demote(ctx);                          break;
       case '.هنرش':    if (parts[1]==='مياه')  await admin.closeGroup(ctx); break;
       case '.افتح':    if (parts[1]==='يبني')  await admin.openGroup(ctx);  break;
-      case '.منع':     if (parts[1]==='روابط') await admin.antiLink(ctx);   break;
+      case '.منع':     
+        if (parts[1]==='روابط') {
+          await admin.antiLink(ctx);
+          await sock.sendMessage(from, { 
+            text: `لو انت راجل نزل لينك وهنيكك فل 🐦` 
+          }, { quoted: msg });
+        }
+        break;
       case '.روابط':   if (parts[1]==='ايقاف') await admin.antiLinkOff(ctx); break;
       case '.منشن':
       case '.منشنز':   await extras.mentionAll(ctx);                     break;
