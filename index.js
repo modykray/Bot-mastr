@@ -28,6 +28,9 @@ const AUTH_FOLDER  = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const MAX_SUB_BOTS = 4;
 
+// ─── مجلد الصور ─────────────────────────────────────────────────────────
+const ASSETS_FOLDER = path.join(__dirname, 'assets');
+
 const logger = pino({ level: 'silent' });
 
 // ─── إسكات ضجيج Baileys الداخلي تماماً ────────────────────────────────────
@@ -59,22 +62,29 @@ const subBotSockets = new Map();
 const userStats = new Map();
 const groupStats = new Map();
 
-// ─── الصور العشوائية للأحداث (10 صور) ────────────────────────────────────
-const randomImages = [
-  'https://i.imgur.com/img1.jpg',
-  'https://i.imgur.com/img2.jpg',
-  'https://i.imgur.com/img3.jpg',
-  'https://i.imgur.com/img4.jpg',
-  'https://i.imgur.com/img5.jpg',
-  'https://i.imgur.com/img6.jpg',
-  'https://i.imgur.com/img7.jpg',
-  'https://i.imgur.com/img8.jpg',
-  'https://i.imgur.com/img9.jpg',
-  'https://i.imgur.com/img10.jpg'
-];
-
-function getRandomImage() {
-  return randomImages[Math.floor(Math.random() * randomImages.length)];
+// ─── دالة جلب الصور العشوائية من مجلد assets ─────────────────────────────
+function getRandomImageFromAssets() {
+  try {
+    if (!fs.existsSync(ASSETS_FOLDER)) {
+      return '';
+    }
+    
+    const files = fs.readdirSync(ASSETS_FOLDER);
+    const imageFiles = files.filter(file => {
+      const ext = path.extname(file).toLowerCase();
+      return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
+    });
+    
+    if (imageFiles.length === 0) {
+      return '';
+    }
+    
+    const randomIndex = Math.floor(Math.random() * imageFiles.length);
+    return path.join(ASSETS_FOLDER, imageFiles[randomIndex]);
+  } catch (e) {
+    console.error('خطأ في قراءة مجلد assets:', e.message);
+    return '';
+  }
 }
 
 // ─── دالة اختيار استيكر احا عشوائي ─────────────────────────────────────
@@ -83,6 +93,35 @@ const ahaStickers = ['aha1', 'aha2', 'aha3'];
 function getRandomAhaSticker() {
     const randomIndex = Math.floor(Math.random() * ahaStickers.length);
     return ahaStickers[randomIndex];
+}
+
+// ─── دالة فحص وحذف الروابط (معدلة - تمسح بس من غير طرد) ─────────────────
+async function checkAndDeleteLinks(sock, msg, from, sender, antiLinkEnabled) {
+  if (!antiLinkEnabled) return;
+  
+  try {
+    const body = msg.message?.conversation || 
+                 msg.message?.extendedTextMessage?.text || '';
+    
+    if (!body) return;
+    
+    const urlRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|(chat\.whatsapp\.com\/[^\s]+)/i;
+    
+    if (urlRegex.test(body)) {
+      await sock.sendMessage(from, { delete: msg.key });
+      
+      await sock.sendMessage(from, { 
+        text: `لو انت راجل نزل لينك وهنيكك فل 🐦`,
+        mentions: [sender]
+      }, { quoted: msg });
+      
+      console.log(`تم مسح رابط من ${sender.split('@')[0]}`);
+      return true;
+    }
+  } catch (e) {
+    console.error('خطأ في فحص الروابط:', e.message);
+  }
+  return false;
 }
 
 // ─── معالجة الرسائل المشتركة ──────────────────────────────────────────────
@@ -125,9 +164,13 @@ async function handleMessage(sock, msg, isSubBot = false) {
       }
     }
 
-    // ── فحص منع الروابط ──────────────────────────────────────────────────
+    // ── فحص منع الروابط (المعدل) ────────────────────────────────────────
     if (!msg.key.fromMe && isGrp) {
-      await admin.checkAntiLink(sock, msg, from, sender);
+      const antiLinkEnabled = await admin.getAntiLinkStatus(from);
+      if (antiLinkEnabled) {
+        const linkDetected = await checkAndDeleteLinks(sock, msg, from, sender, antiLinkEnabled);
+        if (linkDetected) return;
+      }
     }
 
     // ── لو البوت موقوف — الأونر بس يقدر يشغّله تاني ─────────────────────
@@ -139,48 +182,70 @@ async function handleMessage(sock, msg, isSubBot = false) {
       const words = norm.split(/\s+/);
       const pick  = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-      // ── استيكرات الكلمات المخصصة ──────────────────────────────────────
-      if (/بحبك|حبك|حبق|روحي|قلبي|بعشقك/.test(norm)) {
+      // ═══════════════════════════════════════════════════════
+      // 🎯 الأولوية الأولى: الاستيكرات المخصصة
+      // ═══════════════════════════════════════════════════════
+
+      // حب / عشق / قلب / روحي
+      if (/بحبك|حبك|حبق|روحي|قلبي|بعشقك/i.test(norm)) {
         await sock.sendMessage(from, { sticker: { url: './assets/Mhny.webp' } }, { quoted: msg });
         return;
       }
-      if (/جبنة|جبان/.test(norm)) {
-        await sock.sendMessage(from, { sticker: { url: './assets/Gbnt.webp' } }, { quoted: msg });
-        return;
-      }
-      if (/بتاعي|زبي|حنكش|ظوبري/.test(norm)) {
-        await sock.sendMessage(from, { sticker: { url: './assets/Hnksh.webp' } }, { quoted: msg });
-        return;
-      }
-      if (/بنت متناكه|ولاد متناكه|ابن متناكه/.test(norm)) {
-        await sock.sendMessage(from, { sticker: { url: './assets/Mtnak.webp' } }, { quoted: msg });
-        return;
-      }
-      if (/استر|متستر|ما تستر/.test(norm)) {
-        await sock.sendMessage(from, { sticker: { url: './assets/Astr.webp' } }, { quoted: msg });
-        return;
-      }
-      if (/كسمك|يكسمك|بكسمك/.test(norm)) {
-        await sock.sendMessage(from, { sticker: { url: './assets/Ksomk.webp' } }, { quoted: msg });
-        return;
-      }
-      if (/كارف|بتكرف|كارفة/.test(norm)) {
+
+      // كارف / بتكرف / كارفة
+      if (/كارف|بتكرف|كارفة/i.test(norm)) {
         await sock.sendMessage(from, { sticker: { url: './assets/Karf.webp' } }, { quoted: msg });
         return;
       }
-      if (/(?<!\S)يسطا(?!\S)|يا اسطي/.test(norm)) {
+
+      // متناكه (بأي تركيب)
+      if (/بنت.?متناكه|ولاد.?متناكه|ابن.?متناكه|متناكه/i.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Mtnak.webp' } }, { quoted: msg });
+        return;
+      }
+
+      // جبنة / جبان
+      if (/جبنة|جبان/i.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Gbnt.webp' } }, { quoted: msg });
+        return;
+      }
+
+      // بتاعي / زبي / حنكش / ظوبري
+      if (/بتاعي|زبي|حنكش|ظوبري/i.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Hnksh.webp' } }, { quoted: msg });
+        return;
+      }
+
+      // استر / متستر / ما تستر
+      if (/استر|متستر|ما.?تستر/i.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Astr.webp' } }, { quoted: msg });
+        return;
+      }
+
+      // كسمك / يكسمك / بكسمك
+      if (/كسمك|يكسمك|بكسمك/i.test(norm)) {
+        await sock.sendMessage(from, { sticker: { url: './assets/Ksomk.webp' } }, { quoted: msg });
+        return;
+      }
+
+      // يسطا / يا اسطي (استيكر)
+      if (/(?<!\S)يسطا(?!\S)|يا.?اسطي/i.test(norm)) {
         await sock.sendMessage(from, { sticker: { url: './assets/Ysta.webp' } }, { quoted: msg });
         return;
       }
 
-      // ── منشن على المطور ────────────────────────────────────────────────
+      // منشن على المطور
       if (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.includes(`${OWNER_NUMBER}@s.whatsapp.net`)) {
         await sock.sendMessage(from, { sticker: { url: './assets/Mnshn.webp' } }, { quoted: msg });
         return;
       }
 
-      // ── استيكر احا عشوائي ──────────────────────────────────────────────
-      if (norm.includes('احا')) {
+      // ═══════════════════════════════════════════════════════
+      // 🎯 الأولوية الثانية: الردود النصية والصوتية
+      // ═══════════════════════════════════════════════════════
+
+      // احا (استيكر عشوائي)
+      if (/احا/i.test(norm)) {
         const stickerName = getRandomAhaSticker();
         await sock.sendMessage(from, {
           sticker: { url: `./assets/${stickerName}.webp` }
@@ -188,8 +253,8 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
-      // اصحي — يبعت صوت ashahi.m4a
-      if (norm.includes('اصحي')) {
+      // اصحي (صوت)
+      if (/اصحي/i.test(norm)) {
         await sock.sendMessage(from, {
           audio: { url: './assets/ashahi.m4a' },
           mimetype: 'audio/mp4',
@@ -198,15 +263,15 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
-      // خخخ — خخ أو أكتر
-      if (norm.includes('خخ')) {
+      // خخخ
+      if (/خخ/i.test(norm)) {
         await sock.sendMessage(from, {
           text: `خوخ وفاكهة سوق العبور اشخر ع قدك يعرص🐦`,
         }, { quoted: msg });
         return;
       }
 
-      // وه — الكلمة لوحدها أو في جملة
+      // وه (كلمة منفردة)
       if (words.includes('وه')) {
         await sock.sendMessage(from, {
           text: pick([`صدمة مش كده😂🎀`, `حياتي بقت احسن بكتير😂🌚`]),
@@ -214,8 +279,8 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
-      // يسطا — الكلمة في أي مكان في الجملة
-      if (norm.includes('يسطا')) {
+      // يسطا (رد نصي)
+      if (/يسطا/i.test(norm)) {
         await sock.sendMessage(from, {
           text: pick([`اي يسطا🌚🫶🏻`, `قلب الاسطي😂🫶🏻`, `يسطا خدتك ع البسطه😂🫶🏻`]),
         }, { quoted: msg });
@@ -239,7 +304,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
 
       // ══ قائمة الأوامر الجديدة بالشكل المطلوب ═══════════════════════════════════════════
       case '.اوامر': {
-        const randomImg = getRandomImage();
+        const randomImg = getRandomImageFromAssets();
         
         const helpText = 
 `ㅤㅤׄ        (╲︵᷼   ⊹      ⏜✿╱)ㅤㅤ  𝅄ㅤ
@@ -333,10 +398,14 @@ async function handleMessage(sock, msg, isSubBot = false) {
 
  ㅤׄ𐂯◟𝗆𝖺𝖽𝖾 𝖻𝗒 𝗂𝗍𝗌_𝗐𝗁𝗈𝗈𝗈𝗈𝗈𝗈𝗈𝗌𝗁`;
 
-        await sock.sendMessage(from, {
-          image: { url: randomImg },
-          caption: helpText
-        }, { quoted: msg });
+        if (randomImg) {
+          await sock.sendMessage(from, {
+            image: { url: randomImg },
+            caption: helpText
+          }, { quoted: msg });
+        } else {
+          await sock.sendMessage(from, { text: helpText }, { quoted: msg });
+        }
         break;
       }
 
@@ -428,7 +497,6 @@ async function handleMessage(sock, msg, isSubBot = false) {
             ptt: true
           }, { quoted: msg });
           
-          // رسالة واحدة بس بعد الصوت
           setTimeout(async () => {
             await sock.sendMessage(from, {
               text: randomTestMsg
@@ -929,7 +997,6 @@ async function startBot() {
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-    // ── طلب كود الربط بالأسلوب الأصلي ──────────────────────────────────
     if (qr && !sock.authState.creds.registered && !pairingRequested) {
       pairingRequested = true;
       try {
@@ -966,7 +1033,7 @@ async function startBot() {
     }
   });
 
-  // ─── حدث دخول عضو جديد مع صوت ترحيب ورابط المجموعة ────────────────────
+  // ─── حدث دخول عضو جديد ──────────────────────────────────────────────────
   sock.ev.on('group-participants.update', async (update) => {
     try {
       if (update.action === 'add') {
@@ -986,14 +1053,15 @@ async function startBot() {
             const ppUrl = await sock.profilePictureUrl(groupId, 'image');
             groupImage = ppUrl;
           } catch (e) {
-            // مفيش صورة للمجموعة - هنستخدم صورة افتراضية
             groupImage = '';
           }
           
           // جلب رابط المجموعة
           try {
             const code = await sock.groupInviteCode(groupId);
-            groupLink = `https://chat.whatsapp.com/${code}`;
+            if (code) {
+              groupLink = `https://chat.whatsapp.com/${code}`;
+            }
           } catch (e) {
             console.log('مش قادر أجيب رابط المجموعة:', e.message);
           }
@@ -1001,7 +1069,7 @@ async function startBot() {
           console.log('مش قادر أجيب معلومات المجموعة:', e.message);
         }
 
-        // ⚡ أولاً: نبعت صوت الترحيب
+        // ⚡ نبعت صوت الترحيب
         try {
           await sock.sendMessage(groupId, {
             audio: { url: './assets/eren_welcome.mp3' },
@@ -1012,18 +1080,16 @@ async function startBot() {
           console.log('صوت الترحيب مش موجود:', e.message);
         }
 
-        // ⚡ ثانياً: رسالة الترحيب مع صورة المجموعة (جملة واحدة)
-        const welcomeText = `منور البار يقلبي 🐦 @${newMember.split('@')[0]}\nشير البار يقلبي 🐦${groupLink ? `\n${groupLink}` : ''}`;
+        // ⚡ رسالة الترحيب (جملة واحدة) مع صورة المجموعة
+        const welcomeText = `منور البار يقلبي 🐦 @${newMember.split('@')[0]} شير البار يقلبي 🐦 ${groupLink}`;
         
         if (groupImage) {
-          // لو فيه صورة للمجموعة - نبعت الصورة مع الكابشن
           await sock.sendMessage(groupId, {
             image: { url: groupImage },
             caption: welcomeText,
             mentions: [newMember]
           });
         } else {
-          // لو مفيش صورة - نبعت رسالة عادية
           await sock.sendMessage(groupId, {
             text: welcomeText,
             mentions: [newMember]
