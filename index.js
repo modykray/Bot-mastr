@@ -917,10 +917,20 @@ async function startBot() {
         
         let groupName = 'المجموعة';
         let groupLink = '';
+        let groupImage = '';
         
         try {
           const groupMetadata = await sock.groupMetadata(groupId);
           groupName = groupMetadata.subject || 'المجموعة';
+          
+          // جلب صورة المجموعة لو موجودة
+          try {
+            const ppUrl = await sock.profilePictureUrl(groupId, 'image');
+            groupImage = ppUrl;
+          } catch (e) {
+            // مفيش صورة للمجموعة - هنستخدم صورة افتراضية
+            groupImage = '';
+          }
           
           // جلب رابط المجموعة
           try {
@@ -944,17 +954,23 @@ async function startBot() {
           console.log('صوت الترحيب مش موجود:', e.message);
         }
 
-        // ⚡ ثانياً: رسالة "منور البار يقلبي" مع منشن
-        await sock.sendMessage(groupId, {
-          text: `منور البار يقلبي 🐦 @${newMember.split('@')[0]}`,
-          mentions: [newMember]
-        });
-
-        // ⚡ ثالثاً: رسالة "شير البار يقلبي" مع رابط المجموعة لو موجود
-        await sock.sendMessage(groupId, {
-          text: `شير البار يقلبي 🐦${groupLink ? `\nرابط المجموعة: ${groupLink}` : ''}`,
-          mentions: [newMember]
-        });
+        // ⚡ ثانياً: رسالة الترحيب مع صورة المجموعة (جملة واحدة)
+        const welcomeText = `منور البار يقلبي 🐦 @${newMember.split('@')[0]}\nشير البار يقلبي 🐦${groupLink ? `\n${groupLink}` : ''}`;
+        
+        if (groupImage) {
+          // لو فيه صورة للمجموعة - نبعت الصورة مع الكابشن
+          await sock.sendMessage(groupId, {
+            image: { url: groupImage },
+            caption: welcomeText,
+            mentions: [newMember]
+          });
+        } else {
+          // لو مفيش صورة - نبعت رسالة عادية
+          await sock.sendMessage(groupId, {
+            text: welcomeText,
+            mentions: [newMember]
+          });
+        }
       }
     } catch (e) { 
       console.error('welcome error:', e.message); 
