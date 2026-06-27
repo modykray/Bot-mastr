@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-const OWNER_NUMBER = '01110302392';
+const OWNER_NUMBER = '01227812859';
 const AUTH_FOLDER = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const ASSETS_FOLDER = path.join(__dirname, 'assets');
