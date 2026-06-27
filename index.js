@@ -10,18 +10,6 @@ const {
   Browsers,
 } = require('@whiskeysockets/baileys');
 
-const { Boom } = 'use strict';
-
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  isJidBroadcast,
-  makeCacheableSignalKeyStore,
-  Browsers,
-} = require('@whiskeysockets/baileys');
-
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const fs = require('fs');
