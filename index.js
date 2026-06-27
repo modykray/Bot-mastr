@@ -34,30 +34,6 @@ const _origWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = (chunk, ...rest) => {
   const s = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
   if (NOISE.some(n => s.includes(n))) return true;
-  return _origWritesockets/baileysom('@hapi/boom');
-const pino = require('pino');
-const fs = require('fs');
-const path = require('path');
-const http = require('http');
-
-const OWNER_NUMBER = '01227812859';
-const AUTH_FOLDER = path.join(__dirname, 'auth_info');
-const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
-const ASSETS_FOLDER = path.join(__dirname, 'assets');
-const MAX_SUB_BOTS = 4;
-const SUB_BOTS_LIST_FILE = path.join(AUTH_FOLDER, 'sub_bots_list.json');
-
-const logger = pino({ level: 'silent' });
-
-// ─── إسكات الضجيج ──────────────────────────────────────────────
-const NOISE = ['Closing session', 'Closing open session', 'SessionEntry', 'registrationId',
-               'currentRatchet', 'ephemeralKeyPair', 'lastRemoteEphemeralKey', 'indexInfo',
-               'pendingPreKey', '_chains', 'baseKey', 'rootKey', 'privKey', 'pubKey'];
-
-const _origWrite = process.stdout.write.bind(process.stdout);
-process.stdout.write = (chunk, ...rest) => {
-  const s = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
-  if (NOISE.some(n => s.includes(n))) return true;
   return _origWrite(chunk, ...rest);
 };
 
