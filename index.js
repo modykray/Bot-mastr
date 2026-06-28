@@ -16,7 +16,14 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-const OWNER_NUMBER = '201110302392';
+// ─── قائمة الأونرز (4 أرقام) ──────────────────────────────
+const OWNER_NUMBERS = [
+  '201110302392',  // الأونر الأول زي ما هو
+  '201274881908', // الأونر الثاني (عدل الرقم ده)
+  '201234567891', // الأونر الثالث (عدل الرقم ده)
+  '201234567892'  // الأونر الرابع (عدل الرقم ده)
+];
+
 const AUTH_FOLDER = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const ASSETS_FOLDER = path.join(__dirname, 'assets');
@@ -24,6 +31,24 @@ const MAX_SUB_BOTS = 4;
 const SUB_BOTS_LIST_FILE = path.join(AUTH_FOLDER, 'sub_bots_list.json');
 
 const logger = pino({ level: 'silent' });
+
+// ─── دوال مساعدة للأونرز ──────────────────────────────────
+function isOwnerNumber(phone) {
+  if (!phone) return false;
+  // استخراج الرقم من الجيد (لو مع @s.whatsapp.net)
+  const cleanPhone = phone.split('@')[0];
+  return OWNER_NUMBERS.includes(cleanPhone);
+}
+
+function isOwnerJid(jid) {
+  if (!jid) return false;
+  const phone = jid.split('@')[0];
+  return OWNER_NUMBERS.includes(phone);
+}
+
+function getOwnerDisplay() {
+  return OWNER_NUMBERS.map(num => `+${num}`).join(', ');
+}
 
 // ─── إسكات الضجيج ──────────────────────────────────────────────
 const NOISE = ['Closing session', 'Closing open session', 'SessionEntry', 'registrationId',
@@ -182,9 +207,9 @@ async function isAdminOrOwner(sock, groupId, userJid, isOwner) {
 
 function getRandomUser(sock, groupId) {
   try {
-    const users = [...userStats.keys()].filter(u => u !== `${OWNER_NUMBER}@s.whatsapp.net`);
-    return users[Math.floor(Math.random() * users.length)] || `${OWNER_NUMBER}@s.whatsapp.net`;
-  } catch { return `${OWNER_NUMBER}@s.whatsapp.net`; }
+    const users = [...userStats.keys()].filter(u => !isOwnerJid(u));
+    return users[Math.floor(Math.random() * users.length)] || `${OWNER_NUMBERS[0]}@s.whatsapp.net`;
+  } catch { return `${OWNER_NUMBERS[0]}@s.whatsapp.net`; }
 }
 
 // ─── تخزين حالة منع الروابط ────────────────────────────────
@@ -210,8 +235,8 @@ async function handleMessage(sock, msg, isSubBot = false) {
     const senderPhone = sender?.split('@')[0];
     
     // التحقق من ان الرقم ده مرتبط بالبوت
-    const isLinked = subBotSockets.has(senderPhone) || sender === `${OWNER_NUMBER}@s.whatsapp.net`;
-    const isOwner = sender === `${OWNER_NUMBER}@s.whatsapp.net` || msg.key.fromMe;
+    const isLinked = subBotSockets.has(senderPhone) || isOwnerJid(sender);
+    const isOwner = isOwnerJid(sender) || msg.key.fromMe;
     
     // لو الرقم مش مرتبط والبوت مش في جروب يسمعله
     if (!isLinked && !isGrp && !isOwner) {
@@ -336,7 +361,15 @@ async function handleMessage(sock, msg, isSubBot = false) {
         return;
       }
 
-      if (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.includes(`${OWNER_NUMBER}@s.whatsapp.net`)) {
+      // التحقق من منشن أي أونر
+      let mentionFound = false;
+      for (const owner of OWNER_NUMBERS) {
+        if (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.includes(`${owner}@s.whatsapp.net`)) {
+          mentionFound = true;
+          break;
+        }
+      }
+      if (mentionFound) {
         await sock.sendMessage(from, {
           sticker: { url: getStickerPath('Mnshn') }
         }, { quoted: msg });
@@ -358,7 +391,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
     const command = parts[0].toLowerCase();
     const args = parts.slice(1);
 
-    const ctx = { sock, msg, from, sender, args, isGrp, ownerNumber: OWNER_NUMBER, isOwner, body };
+    const ctx = { sock, msg, from, sender, args, isGrp, ownerNumbers: OWNER_NUMBERS, isOwner, body };
 
     console.log(`[${isSubBot ? 'SUB' : 'BOT'}] ${sender?.split('@')[0]} → ${command}`);
 
@@ -370,7 +403,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
         const helpText = 
 `ㅤㅤׄ        (╲︵᷼   ⊹      ⏜✿╱)ㅤㅤ  𝅄ㅤ
  ㅤ               \`Erin 𝖻𝗈𝗍\` ㅤׅ
- ׅ    ׂ  ⤹⤹᪲  ۪ 𝗈𝗐𝗇𝖾𝗋 : ${OWNER_NUMBER}
+ ׅ    ׂ  ⤹⤹᪲  ۪ 𝗈𝗐𝗇𝖾𝗋𝗌 : ${getOwnerDisplay()}
  ׅ    ׂ  ⤹⤹᪲  ۪ 𝖻𝗈𝗍 : ايرن بوت
  ׅ    ׂ  ⤹⤹᪲  ۪ 𝗌𝗍𝖺𝗍𝗎𝗌 : 𝗈𝗇𝗅𝗂𝗇𝖾 24/7
  ㅤ ⊹┉─ׄ───┈‌   ⑅   ‌┈───ׅ─┉⊹
@@ -378,7 +411,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
 ╭᥍╮ ᰨ 𝖼𝗈𝗆𝗆𝖺𝗇𝖽𝗌◝
 │  │ ׂ ᩮ⃘᪁ ׅ بنج ⇢ سرعة البوت
 │  │ ׂ ᩮ⃘᪁ ׅ تست ⇢ اختبار البوت
-│  │ ׂ ᩮ⃘᪁ ׅ المطور ⇢ رقم المطور
+│  │ ׂ ᩮ⃘᪁ ׅ المطور ⇢ أرقام المطورين
 │  │ ׂ ᩮ⃘᪁ ׅ تنصيب ⇢ ربط البوت برقمك
 │  │ ׂ ᩮ⃘᪁ ׅ زوجني ⇢ زواج وهمي
 │  │ ׂ ᩮ⃘᪁ ׅ رجولتي ⇢ نسبة رجولتك
@@ -943,7 +976,15 @@ async function handleMessage(sock, msg, isSubBot = false) {
       // ─── اونر ──────────────────────────────────────────────
       case '.اونر': {
         await sock.sendMessage(from, {
-          text: `👑 *أونر البوت*\n\n📞 +${OWNER_NUMBER}\n\nتواصل معاه لو محتاج حاجة 🐦`
+          text: `👑 *أونرز البوت*\n\n📞 ${getOwnerDisplay()}\n\nتواصل معاهم لو محتاج حاجة 🐦`
+        }, { quoted: msg });
+        break;
+      }
+
+      // ─── المطور ────────────────────────────────────────────
+      case '.المطور': {
+        await sock.sendMessage(from, {
+          text: `👑 *المطورين*\n\n📞 ${getOwnerDisplay()}\n\nتواصل معاهم لو محتاج حاجة 🐦`
         }, { quoted: msg });
         break;
       }
@@ -991,7 +1032,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
       case '.بوت_معلومات': {
         const list = getSubBotNumbers();
         const info = `🤖 *معلومات ايرن بوت*\n\n` +
-                     `📱 *الأونر:* +${OWNER_NUMBER}\n` +
+                     `📱 *الأونرز:* ${getOwnerDisplay()}\n` +
                      `🔄 *الإصدار:* 2.0.0\n` +
                      `📊 *الأجهزة المرتبطة:* ${list.length}/${MAX_SUB_BOTS}\n` +
                      `✅ *الحالة:* ${botEnabled ? '🟢 شغال' : '🔴 موقوف'}\n` +
@@ -1080,7 +1121,7 @@ async function handleMessage(sock, msg, isSubBot = false) {
           // إرسال رسالة تأكيد للرقم الجديد
           try {
             await sock.sendMessage(from, {
-              text: `✅ *تم الربط بنجاح!*\n\n🤖 البوت دلوقتي بيسمع رسايل رقمك\n📱 رقمك: +${phone}\n👑 الأونر: +${OWNER_NUMBER}\n\n*الأوامر المتاحة:*\n.اوامر - عرض الأوامر\n.بوت - حالة البوت\n.تست - اختبار البوت`
+              text: `✅ *تم الربط بنجاح!*\n\n🤖 البوت دلوقتي بيسمع رسايل رقمك\n📱 رقمك: +${phone}\n👑 الأونرز: ${getOwnerDisplay()}\n\n*الأوامر المتاحة:*\n.اوامر - عرض الأوامر\n.بوت - حالة البوت\n.تست - اختبار البوت`
             });
           } catch {}
 
@@ -1235,6 +1276,7 @@ async function startBot() {
   const { version } = await fetchLatestBaileysVersion();
 
   console.log(`\n🚀 جاري الاتصال... واتساب: ${version.join('.')}`);
+  console.log(`👑 الأونرز: ${getOwnerDisplay()}`);
 
   const sock = makeWASocket({
     version, logger,
@@ -1252,7 +1294,7 @@ async function startBot() {
     if (qr && !sock.authState.creds.registered && !pairingRequested) {
       pairingRequested = true;
       try {
-        const code = await sock.requestPairingCode(OWNER_NUMBER);
+        const code = await sock.requestPairingCode(OWNER_NUMBERS[0]);
         const display = String(code).replace(/(.{4})/g, '$1-').slice(0, -1);
         console.log('\n╔══════════════════════════════════════╗');
         console.log(`║   🔑  كود الربط : ${display.padEnd(12)}  ║`);
@@ -1351,7 +1393,7 @@ async function startBot() {
 // ─── تشغيل البوت ────────────────────────────────────────────
 console.log('╔═══════════════════════════════════╗');
 console.log('║       🤖  ايرن بوت               ║');
-console.log(`║  📞  ${OWNER_NUMBER}   ║`);
+console.log(`║  👑  ${getOwnerDisplay()}   ║`);
 console.log('╚═══════════════════════════════════╝');
 
 const PORT = process.env.PORT || 3000;
