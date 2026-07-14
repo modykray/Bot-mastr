@@ -17,7 +17,7 @@ const path = require('path');
 const http = require('http');
 
 // ─── رقم الأونر الوحيد ──────────────────────────────────────
-const OWNER_NUMBER = '201110302392'; // حط رقمك هنا
+const OWNER_NUMBER = '201044013292'; // حط رقمك هنا
 
 const AUTH_FOLDER = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
