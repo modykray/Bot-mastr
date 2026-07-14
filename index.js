@@ -17,7 +17,7 @@ const path = require('path');
 const http = require('http');
 
 // ─── رقم الأونر الوحيد ──────────────────────────────────────
-const OWNER_NUMBER = '201044013292'; // حط رقمك هنا
+const OWNER_NUMBER = '201110302392'; // حط رقمك هنا
 
 const AUTH_FOLDER = path.join(__dirname, 'auth_info');
 const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
@@ -153,8 +153,47 @@ function getRandomImage() {
   } catch { return null; }
 }
 
-// ─── متغير لتتبع آخر مرة تم فيها إرسال الصوت ────────────────
-let lastAudioTime = 0;
+// ─── متغيرات لتتبع آخر مرة تم فيها إرسال الصوت ────────────────
+let lastAudioTimes = {
+  'بتيجي': 0,
+  'ععع': 0
+};
+
+// ─── دوال إرسال الصوت ──────────────────────────────────────────
+async function sendAudio(sock, from, command) {
+  const now = Date.now();
+  
+  // التأكد من مرور 60 ثانية لكل أمر
+  if (now - lastAudioTimes[command] < 60000) {
+    return;
+  }
+  
+  lastAudioTimes[command] = now;
+  
+  let audioFile;
+  if (command === 'بتيجي') {
+    audioFile = 'bt7.m4a';
+  } else if (command === 'ععع') {
+    audioFile = 'aaa3.m4a';
+  }
+  
+  const audioPath = path.join(ASSETS_FOLDER, audioFile);
+  
+  if (fs.existsSync(audioPath)) {
+    try {
+      await sock.sendMessage(from, {
+        audio: { url: audioPath },
+        mimetype: 'audio/mp4',
+        ptt: true
+      });
+      console.log(`✅ تم إرسال الصوت ${audioFile}`);
+    } catch (e) {
+      console.error(`❌ فشل إرسال الصوت ${audioFile}:`, e.message);
+    }
+  } else {
+    console.log(`❌ ملف ${audioFile} مش موجود في assets`);
+  }
+}
 
 // ─── معالجة الرسائل ────────────────────────────────────────────
 async function handleMessage(sock, msg, isSubBot = false) {
@@ -182,35 +221,20 @@ async function handleMessage(sock, msg, isSubBot = false) {
 
     if (!botEnabled && !isOwner) return;
 
-    // ─── أمر بتيجي ──────────────────────────────────────────────
-    // البوت يسمع نفسه فقط والكلمة بدون نقطة
-    if (body && body.trim() === 'بتيجي' && msg.key.fromMe) {
-      const now = Date.now();
+    // ─── أوامر الصوت ────────────────────────────────────────────
+    // البوت يسمع نفسه فقط والكلمات بدون نقطة
+    if (body && msg.key.fromMe) {
+      const trimmed = body.trim();
       
-      // التأكد من مرور 60 ثانية
-      if (now - lastAudioTime < 60000) {
+      if (trimmed === 'بتيجي') {
+        await sendAudio(sock, from, 'بتيجي');
         return;
       }
       
-      lastAudioTime = now;
-      
-      const audioPath = path.join(ASSETS_FOLDER, 'bt7.m4a');
-      
-      if (fs.existsSync(audioPath)) {
-        try {
-          await sock.sendMessage(from, {
-            audio: { url: audioPath },
-            mimetype: 'audio/mp4',
-            ptt: true
-          });
-          console.log('✅ تم إرسال الصوت bt7.m4a');
-        } catch (e) {
-          console.error('❌ فشل إرسال الصوت:', e.message);
-        }
-      } else {
-        console.log('❌ ملف bt7.m4a مش موجود في assets');
+      if (trimmed === 'ععع') {
+        await sendAudio(sock, from, 'ععع');
+        return;
       }
-      return;
     }
 
     if (!body.startsWith('.')) return;
