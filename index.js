@@ -156,7 +156,8 @@ function getRandomImage() {
 // ─── متغيرات لتتبع آخر مرة تم فيها إرسال الصوت ────────────────
 let lastAudioTimes = {
   'بتيجي': 0,
-  'ععع': 0
+  'ععع': 0,
+  'وه': 0
 };
 
 // ─── دوال إرسال الصوت ──────────────────────────────────────────
@@ -175,6 +176,8 @@ async function sendAudio(sock, from, command) {
     audioFile = 'bt7.m4a';
   } else if (command === 'ععع') {
     audioFile = 'aaa3.m4a';
+  } else if (command === 'وه') {
+    audioFile = 'T3.m4p';
   }
   
   const audioPath = path.join(ASSETS_FOLDER, audioFile);
@@ -233,6 +236,11 @@ async function handleMessage(sock, msg, isSubBot = false) {
       
       if (trimmed === 'ععع') {
         await sendAudio(sock, from, 'ععع');
+        return;
+      }
+      
+      if (trimmed === 'وه') {
+        await sendAudio(sock, from, 'وه');
         return;
       }
     }
