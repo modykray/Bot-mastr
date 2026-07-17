@@ -157,7 +157,8 @@ function getRandomImage() {
 let lastAudioTimes = {
   'بتيجي': 0,
   'ععع': 0,
-  'وه': 0
+  'وه': 0,
+  'ترو': 0  // ← إضافة أمر ترو
 };
 
 // ─── دوال إرسال الصوت ──────────────────────────────────────────
@@ -178,6 +179,8 @@ async function sendAudio(sock, from, command) {
     audioFile = 'aaa3.m4a';
   } else if (command === 'وه') {
     audioFile = 'T3.m4p';
+  } else if (command === 'ترو') {  // ← إضافة أمر ترو
+    audioFile = 'Ym3.m4a';  // اسم الملف المطلوب
   }
   
   const audioPath = path.join(ASSETS_FOLDER, audioFile);
@@ -241,6 +244,11 @@ async function handleMessage(sock, msg, isSubBot = false) {
       
       if (trimmed === 'وه') {
         await sendAudio(sock, from, 'وه');
+        return;
+      }
+      
+      if (trimmed === 'ترو') {  // ← إضافة شرط ترو
+        await sendAudio(sock, from, 'ترو');
         return;
       }
     }
