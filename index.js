@@ -16,32 +16,25 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-// ─── رقم الأونر الوحيد ──────────────────────────────────────
-const OWNER_NUMBER = '201044013292'; // حط رقمك هنا
+// ─── رقم البوت الوحيد ──────────────────────────────────────
+const BOT_NUMBER = '201044013292'; // رقم البوت
 
 const AUTH_FOLDER = path.join(__dirname, 'auth_info');
-const SUB_BOTS_DIR = path.join(AUTH_FOLDER, 'sub_bots');
 const ASSETS_FOLDER = path.join(__dirname, 'assets');
-const MAX_SUB_BOTS = 4;
-const SUB_BOTS_LIST_FILE = path.join(AUTH_FOLDER, 'sub_bots_list.json');
 
 const logger = pino({ level: 'silent' });
 
-// ─── دوال مساعدة للأونر ────────────────────────────────────
-function isOwnerNumber(phone) {
+// ─── دوال مساعدة للبوت ────────────────────────────────────
+function isBotNumber(phone) {
   if (!phone) return false;
   const cleanPhone = phone.split('@')[0];
-  return cleanPhone === OWNER_NUMBER;
+  return cleanPhone === BOT_NUMBER;
 }
 
-function isOwnerJid(jid) {
+function isBotJid(jid) {
   if (!jid) return false;
   const phone = jid.split('@')[0];
-  return phone === OWNER_NUMBER;
-}
-
-function getOwnerDisplay() {
-  return `+${OWNER_NUMBER}`;
+  return phone === BOT_NUMBER;
 }
 
 // ─── إسكات الضجيج ──────────────────────────────────────────────
@@ -67,80 +60,9 @@ console.log = (...args) => {
 let botEnabled = true;
 let currentMainSock = null;
 let pairingRequested = false;
-const subBotSockets = new Map();
 
-// ─── دوال حفظ وإدارة البوتات الفرعية ──────────────────────────
-function saveSubBotNumber(phone) {
-  try {
-    let list = [];
-    if (fs.existsSync(SUB_BOTS_LIST_FILE)) {
-      list = JSON.parse(fs.readFileSync(SUB_BOTS_LIST_FILE, 'utf8'));
-    }
-    if (!list.includes(phone)) {
-      list.push(phone);
-      fs.writeFileSync(SUB_BOTS_LIST_FILE, JSON.stringify(list, null, 2));
-    }
-  } catch (e) {
-    console.error('خطأ في حفظ البوت الفرعي:', e.message);
-  }
-}
-
-function removeSubBotNumber(phone) {
-  try {
-    if (fs.existsSync(SUB_BOTS_LIST_FILE)) {
-      let list = JSON.parse(fs.readFileSync(SUB_BOTS_LIST_FILE, 'utf8'));
-      list = list.filter(p => p !== phone);
-      fs.writeFileSync(SUB_BOTS_LIST_FILE, JSON.stringify(list, null, 2));
-    }
-  } catch (e) {
-    console.error('خطأ في حذف البوت الفرعي:', e.message);
-  }
-}
-
-function getSubBotNumbers() {
-  try {
-    if (fs.existsSync(SUB_BOTS_LIST_FILE)) {
-      return JSON.parse(fs.readFileSync(SUB_BOTS_LIST_FILE, 'utf8'));
-    }
-  } catch (e) {
-    console.error('خطأ في قراءة البوتات الفرعية:', e.message);
-  }
-  return [];
-}
-
-// ─── إيقاف كل البوتات الفرعية ──────────────────────────────
-async function stopAllSubBots() {
-  console.log('🛑 جاري إيقاف كل البوتات الفرعية...');
-  for (const [phone, subSock] of subBotSockets) {
-    try {
-      if (subSock && typeof subSock.end === 'function') {
-        subSock.end(new Error('main_bot_stopped'));
-      }
-    } catch (e) {
-      console.error(`خطأ في إيقاف بوت +${phone}:`, e.message);
-    }
-  }
-  subBotSockets.clear();
-  console.log('✅ تم إيقاف كل البوتات الفرعية');
-}
-
-// ─── تحميل البوتات الفرعية من القائمة المحفوظة ──────────────
-async function loadSubBotsFromList(mainSock) {
-  const numbers = getSubBotNumbers();
-  if (numbers.length === 0) {
-    console.log('📂 مفيش بوتات فرعية محفوظة');
-    return;
-  }
-  
-  console.log(`📂 جاري تحميل ${numbers.length} بوت فرعي محفوظ...`);
-  for (const phone of numbers) {
-    if (!subBotSockets.has(phone)) {
-      await startSubBotSession(phone, mainSock).catch(e => {
-        console.error(`خطأ في تحميل بوت +${phone}:`, e.message);
-      });
-    }
-  }
-}
+// ─── تخزين أرقام الأدمن لكل مجموعة ──────────────────────────
+const adminCache = new Map();
 
 // ─── دوال المساعدة ──────────────────────────────────────────────
 function getRandomImage() {
@@ -153,38 +75,26 @@ function getRandomImage() {
   } catch { return null; }
 }
 
-// ─── متغيرات لتتبع آخر مرة تم فيها إرسال الصوت ────────────────
+// ─── دوال إرسال الصوت ──────────────────────────────────────────
 let lastAudioTimes = {
   'بتيجي': 0,
   'ععع': 0,
   'وه': 0,
-  'ترو': 0  // ← إضافة أمر ترو
+  'ترو': 0
 };
 
-// ─── دوال إرسال الصوت ──────────────────────────────────────────
 async function sendAudio(sock, from, command) {
   const now = Date.now();
-  
-  // التأكد من مرور 60 ثانية لكل أمر
-  if (now - lastAudioTimes[command] < 60000) {
-    return;
-  }
-  
+  if (now - lastAudioTimes[command] < 60000) return;
   lastAudioTimes[command] = now;
   
   let audioFile;
-  if (command === 'بتيجي') {
-    audioFile = 'bt7.m4a';
-  } else if (command === 'ععع') {
-    audioFile = 'aaa3.m4a';
-  } else if (command === 'وه') {
-    audioFile = 'T3.m4p';
-  } else if (command === 'ترو') {  // ← إضافة أمر ترو
-    audioFile = 'Ym3.m4a';  // اسم الملف المطلوب
-  }
+  if (command === 'بتيجي') audioFile = 'bt7.m4a';
+  else if (command === 'ععع') audioFile = 'aaa3.m4a';
+  else if (command === 'وه') audioFile = 'T3.m4p';
+  else if (command === 'ترو') audioFile = 'Ym3.m4a';
   
   const audioPath = path.join(ASSETS_FOLDER, audioFile);
-  
   if (fs.existsSync(audioPath)) {
     try {
       await sock.sendMessage(from, {
@@ -192,17 +102,42 @@ async function sendAudio(sock, from, command) {
         mimetype: 'audio/mp4',
         ptt: true
       });
-      console.log(`✅ تم إرسال الصوت ${audioFile}`);
     } catch (e) {
-      console.error(`❌ فشل إرسال الصوت ${audioFile}:`, e.message);
+      console.error(`❌ فشل إرسال الصوت:`, e.message);
     }
-  } else {
-    console.log(`❌ ملف ${audioFile} مش موجود في assets`);
+  }
+}
+
+// ─── التحقق من أن العضو أدمن ──────────────────────────────────
+async function isUserAdmin(sock, groupJid, participantJid) {
+  try {
+    // التحقق من الكاش أولاً
+    const cacheKey = `${groupJid}_${participantJid}`;
+    if (adminCache.has(cacheKey)) {
+      return adminCache.get(cacheKey);
+    }
+
+    // جلب معلومات المجموعة
+    const groupMetadata = await sock.groupMetadata(groupJid);
+    const admins = groupMetadata.participants
+      .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
+      .map(p => p.id);
+    
+    const isAdmin = admins.includes(participantJid);
+    
+    // تخزين في الكاش لمدة 5 دقائق
+    adminCache.set(cacheKey, isAdmin);
+    setTimeout(() => adminCache.delete(cacheKey), 5 * 60 * 1000);
+    
+    return isAdmin;
+  } catch (error) {
+    console.error('خطأ في التحقق من الأدمن:', error.message);
+    return false;
   }
 }
 
 // ─── معالجة الرسائل ────────────────────────────────────────────
-async function handleMessage(sock, msg, isSubBot = false) {
+async function handleMessage(sock, msg) {
   try {
     if (!msg.message) return;
     if (isJidBroadcast(msg.key.remoteJid)) return;
@@ -212,42 +147,34 @@ async function handleMessage(sock, msg, isSubBot = false) {
     const sender = isGrp ? msg.key.participant : msg.key.remoteJid;
     const senderPhone = sender?.split('@')[0];
     
-    const isOwner = isOwnerJid(sender) || msg.key.fromMe;
-    const isLinked = subBotSockets.has(senderPhone) || isOwner;
-    
-    // لو الرقم مش مربوط - يتجاهل
-    if (!isLinked && !isGrp && !isOwner) {
-      return;
-    }
+    // التحقق من أن المرسل هو البوت نفسه فقط
+    const isBot = isBotJid(sender) || msg.key.fromMe;
+    if (!isBot) return; // تجاهل أي رسالة من غير البوت
     
     const body = msg.message?.conversation ||
                  msg.message?.extendedTextMessage?.text ||
                  msg.message?.imageMessage?.caption ||
                  msg.message?.videoMessage?.caption || '';
 
-    if (!botEnabled && !isOwner) return;
+    if (!botEnabled) return;
 
     // ─── أوامر الصوت ────────────────────────────────────────────
-    // البوت يسمع نفسه فقط والكلمات بدون نقطة
-    if (body && msg.key.fromMe) {
+    if (body) {
       const trimmed = body.trim();
       
       if (trimmed === 'بتيجي') {
         await sendAudio(sock, from, 'بتيجي');
         return;
       }
-      
       if (trimmed === 'ععع') {
         await sendAudio(sock, from, 'ععع');
         return;
       }
-      
       if (trimmed === 'وه') {
         await sendAudio(sock, from, 'وه');
         return;
       }
-      
-      if (trimmed === 'ترو') {  // ← إضافة شرط ترو
+      if (trimmed === 'ترو') {
         await sendAudio(sock, from, 'ترو');
         return;
       }
@@ -259,116 +186,24 @@ async function handleMessage(sock, msg, isSubBot = false) {
     const command = parts[0].toLowerCase();
     const args = parts.slice(1);
 
-    console.log(`[${isSubBot ? 'SUB' : 'BOT'}] ${sender?.split('@')[0]} → ${command}`);
+    console.log(`[BOT] ${sender?.split('@')[0]} → ${command}`);
 
     switch (command) {
 
-      // ─── أمر تشغيل البوت (تنصيب) ────────────────────────────
-      case '.تنصيب': {
-        // بس الأونر يقدر يشغل البوت
-        if (!isOwner) {
+      // ─── الأمر الوحيد: منع روابط ────────────────────────────
+      case '.منع_روابط': {
+        // فقط البوت يقدر يستخدم الأمر
+        if (!isBot) {
           await sock.sendMessage(from, { 
-            text: '❌ الأمر ده للأونر بس' 
-          }, { quoted: msg });
-          break;
-        }
-
-        if (isGrp) {
-          await sock.sendMessage(from, {
-            text: `📱 ابعت الأمر ده في الخاص عشان تولد كود ربط`
-          }, { quoted: msg });
-          break;
-        }
-
-        const phone = from.split('@')[0];
-        const list = getSubBotNumbers();
-        
-        if (list.length >= MAX_SUB_BOTS) {
-          await sock.sendMessage(from, {
-            text: `❌ العدد الأقصى ${MAX_SUB_BOTS} أجهزة مرتبطة`
-          }, { quoted: msg });
-          break;
-        }
-
-        if (subBotSockets.has(phone)) {
-          await sock.sendMessage(from, {
-            text: `⚠️ رقمك +${phone} مربوط بالفعل!`
+            text: '❌ الأمر ده للبوت بس' 
           }, { quoted: msg });
           break;
         }
 
         await sock.sendMessage(from, {
-          text: `⏳ جاري تجهيز كود الربط لرقم *+${phone}*...`
-        }, { quoted: msg });
-
-        try {
-          const rawCode = await sock.requestPairingCode(phone);
-          const display = String(rawCode).replace(/(.{4})/g, '$1-').slice(0, -1);
-
-          saveSubBotNumber(phone);
-          subBotSockets.set(phone, { phone: phone });
-
-          await sock.sendMessage(from, {
-            text:
-              `╔═══════════════════════════════════╗\n` +
-              `║      🔑 *كود ربط واتساب*           ║\n` +
-              `╠═══════════════════════════════════╣\n` +
-              `║                                   ║\n` +
-              `║         *${display}*              ║\n` +
-              `║                                   ║\n` +
-              `╚═══════════════════════════════════╝\n\n` +
-              `📱 *خطوات الربط:*\n` +
-              `1️⃣ افتح واتساب على الموبايل\n` +
-              `2️⃣ اذهب إلى الإعدادات ← الأجهزة المرتبطة\n` +
-              `3️⃣ اضغط *ربط جهاز*\n` +
-              `4️⃣ اختار *ربط برقم الهاتف*\n` +
-              `5️⃣ أدخل الكود: *${display}*`
-          }, { quoted: msg });
-
-        } catch (err) {
-          removeSubBotNumber(phone);
-          subBotSockets.delete(phone);
-          
-          await sock.sendMessage(from, {
-            text: `❌ *فشل الربط:* ${err.message}`
-          }, { quoted: msg });
-        }
-        break;
-      }
-
-      // ─── رفرش ──────────────────────────────────────────────
-      case '.رفرش': {
-        if (!isOwner) {
-          await sock.sendMessage(from, { text: '❌ الأمر ده للأونر بس' }, { quoted: msg });
-          break;
-        }
-        
-        botEnabled = true;
-        await sock.sendMessage(from, {
-          text: `🔄 *جاري إعادة التشغيل...*`
+          text: `✅ *تم تفعيل منع الروابط*\n📌 أي رابط هيتحذف تلقائياً\n🔒 البوت هو المتحكم الوحيد\n👑 الأدمن معفيين من المنع`
         }, { quoted: msg });
         
-        setTimeout(() => {
-          try { 
-            currentMainSock?.end(new Error('manual_refresh')); 
-          } catch {}
-        }, 1500);
-        break;
-      }
-
-      // ─── بور_اوف ──────────────────────────────────────────
-      case '.بور_اوف': {
-        if (!isOwner) {
-          await sock.sendMessage(from, { text: '❌ الأمر ده للأونر بس' }, { quoted: msg });
-          break;
-        }
-        
-        botEnabled = false;
-        await stopAllSubBots();
-        
-        await sock.sendMessage(from, {
-          text: `⛔ *البوت اتوقف*\nاكتب *.رفرش* عشان يرجع يشتغل`
-        }, { quoted: msg });
         break;
       }
 
@@ -379,64 +214,16 @@ async function handleMessage(sock, msg, isSubBot = false) {
   }
 }
 
-// ─── بدء البوت الفرعي ──────────────────────────────────────
-async function startSubBotSession(phone, mainSock) {
-  const dir = path.join(SUB_BOTS_DIR, phone);
-  fs.mkdirSync(dir, { recursive: true });
-
-  const { state, saveCreds } = await useMultiFileAuthState(dir);
-  const { version } = await fetchLatestBaileysVersion();
-
-  const subSock = makeWASocket({
-    version, logger,
-    browser: Browsers.ubuntu('Chrome'),
-    auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
-    printQRInTerminal: false,
-    markOnlineOnConnect: false,
-    generateHighQualityLinkPreview: false,
-  });
-
-  subSock.ev.on('creds.update', saveCreds);
-
-  subSock.ev.on('connection.update', async ({ connection, lastDisconnect }) => {
-    if (connection === 'open') {
-      console.log(`✅ بوت فرعي: +${phone}`);
-      subBotSockets.set(phone, subSock);
-    } else if (connection === 'close') {
-      const code = new Boom(lastDisconnect?.error)?.output?.statusCode;
-      if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession) {
-        console.log(`⚠️ بوت فرعي +${phone} انتهى`);
-        subBotSockets.delete(phone);
-        removeSubBotNumber(phone);
-        const d = path.join(SUB_BOTS_DIR, phone);
-        if (fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true });
-      } else {
-        console.log(`🔄 إعادة اتصال البوت الفرعي +${phone}...`);
-        setTimeout(() => startSubBotSession(phone, mainSock).catch(console.error), 5000);
-      }
-    }
-  });
-
-  subSock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-    for (const m of messages) await handleMessage(subSock, m, true);
-  });
-
-  subBotSockets.set(phone, subSock);
-  return subSock;
-}
-
 // ─── البوت الأساسي ──────────────────────────────────────────
 async function startBot() {
   pairingRequested = false;
   fs.mkdirSync(AUTH_FOLDER, { recursive: true });
-  fs.mkdirSync(SUB_BOTS_DIR, { recursive: true });
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
   const { version } = await fetchLatestBaileysVersion();
 
   console.log(`\n🚀 جاري الاتصال... واتساب: ${version.join('.')}`);
-  console.log(`👑 الأونر: ${getOwnerDisplay()}`);
+  console.log(`🤖 رقم البوت: ${BOT_NUMBER}`);
 
   const sock = makeWASocket({
     version, logger,
@@ -454,7 +241,7 @@ async function startBot() {
     if (qr && !sock.authState.creds.registered && !pairingRequested) {
       pairingRequested = true;
       try {
-        const code = await sock.requestPairingCode(OWNER_NUMBER);
+        const code = await sock.requestPairingCode(BOT_NUMBER);
         const display = String(code).replace(/(.{4})/g, '$1-').slice(0, -1);
         console.log('\n╔══════════════════════════════════════╗');
         console.log(`║   🔑  كود الربط : ${display.padEnd(12)}  ║`);
@@ -469,10 +256,6 @@ async function startBot() {
       pairingRequested = false;
       botEnabled = true;
       console.log(`✅ البوت متصل! +${sock.user?.id?.split(':')[0]}`);
-      
-      if (subBotSockets.size === 0) {
-        await loadSubBotsFromList(sock);
-      }
     }
 
     if (connection === 'close') {
@@ -483,35 +266,86 @@ async function startBot() {
         console.log('🗑 جلسة تالفة — إعادة بدء...');
         if (fs.existsSync(AUTH_FOLDER)) {
           fs.readdirSync(AUTH_FOLDER)
-            .filter(f => f !== 'sub_bots' && f !== 'sub_bots_list.json')
             .forEach(f => fs.rmSync(path.join(AUTH_FOLDER, f), { recursive: true, force: true }));
         }
         setTimeout(startBot, 3000);
       } else {
-        if (!botEnabled) {
-          await stopAllSubBots();
-        }
         setTimeout(startBot, 5000);
       }
     }
   });
 
+  // ─── معالجة كل الرسائل (للكشف عن الروابط) ──────────────────
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
-    for (const m of messages) await handleMessage(sock, m, false);
+    
+    for (const m of messages) {
+      const from = m.key.remoteJid;
+      const isGrp = from?.endsWith('@g.us');
+      const sender = isGrp ? m.key.participant : m.key.remoteJid;
+      
+      // التحقق من وجود رابط في الرسالة
+      const msgBody = m.message?.conversation ||
+                     m.message?.extendedTextMessage?.text ||
+                     m.message?.imageMessage?.caption ||
+                     m.message?.videoMessage?.caption || '';
+      
+      // الكشف عن الروابط (regex بسيط)
+      const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9-]+\.[a-zA-Z]{2,}\S*)/gi;
+      const hasLink = urlRegex.test(msgBody);
+      
+      // إذا كان في رابط والمرسل مش البوت
+      if (hasLink && !isBotJid(sender) && !m.key.fromMe) {
+        // التحقق من أن المرسل مش أدمن (في حالة المجموعة)
+        let isAdmin = false;
+        if (isGrp) {
+          isAdmin = await isUserAdmin(sock, from, sender);
+        }
+        
+        // إذا كان أدمن، نسمح له بإرسال الرابط
+        if (isAdmin) {
+          console.log(`👑 أدمن ${sender?.split('@')[0]} أرسل رابط - تم السماح`);
+          continue; // تخطي الحذف
+        }
+        
+        // حذف الرسالة (لغير الأدمن)
+        try {
+          await sock.sendMessage(from, {
+            delete: {
+              remoteJid: from,
+              fromMe: false,
+              id: m.key.id,
+              participant: m.key.participant
+            }
+          });
+          
+          // إرسال تحذير
+          await sock.sendMessage(from, {
+            text: `🚫 *تم حذف الرابط*\n📌 ممنوع إرسال روابط في هذه المجموعة\n👑 الأدمن فقط مسموح لهم`
+          });
+          
+          console.log(`🗑 تم حذف رابط من ${sender?.split('@')[0]}`);
+        } catch (err) {
+          console.error('❌ فشل حذف الرابط:', err.message);
+        }
+      }
+      
+      // معالجة باقي الأوامر
+      await handleMessage(sock, m);
+    }
   });
 }
 
 // ─── تشغيل البوت ────────────────────────────────────────────
 console.log('╔═══════════════════════════════════╗');
-console.log('║       🤖  ايرن بوت               ║');
-console.log(`║  👑  ${getOwnerDisplay()}   ║`);
+console.log('║       🤖  بوت منع الروابط         ║');
+console.log(`║  📱  ${BOT_NUMBER}   ║`);
 console.log('╚═══════════════════════════════════╝');
 
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('🤖 ايرن بوت شغال 24/7 🐦');
+  res.end('🤖 بوت منع الروابط شغال 24/7 🚫');
 }).listen(PORT, () => {
   console.log(`✅ بورت مفتوح على ${PORT}`);
 });
