@@ -18,9 +18,16 @@ const http = require('http');
 const axios = require('axios');
 const FormData = require('form-data');
 
-// ─── رقم البوت ومفتاح API ──────────────────────────────────
+// ─── قراءة ملف .env ──────────────────────────────────────────
+require('dotenv').config(); // السطر ده هو اللي هيقرا المفتاح من ملف الـ env
+
+// ─── إعدادات البوت ──────────────────────────────────────────
 const BOT_NUMBER = '201044013292';
-const OPENAI_API_KEY = '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';
+
+// ✅ المفتاح هنا بياخده من ملف .env مش باين في الكود
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY; 
+
+let botEnabled = true; // ✅ تم إصلاح مشكلة الخطأ
 
 const AUTH_FOLDER = path.join(__dirname, 'auth_info');
 const ASSETS_FOLDER = path.join(__dirname, 'assets');
@@ -307,17 +314,12 @@ async function handleMessage(sock, msg) {
     }
 
     // ─── الرد على أي رسالة (حتى بدون نقطة) ────────────────────
-    // البوت يرد على نفسه وعلي أي حد
     if (!fullText.startsWith('.')) {
-      // منع البوت من الرد على رسائله الصوتية أو الصور
       if (msg.message?.audioMessage || msg.message?.imageMessage || msg.message?.videoMessage) {
         return;
       }
       
-      // البوت يرد على أي رسالة نصية (حتى من نفسه)
       console.log(`💬 ${sender?.split('@')[0]} قال: ${fullText}`);
-      
-      // إرسال مؤشر الكتابة
       await sock.sendPresenceUpdate('composing', from);
       
       const reply = await askChatGPT(fullText);
@@ -507,7 +509,7 @@ async function startBot() {
 
   console.log(`\n🚀 جاري الاتصال... واتساب: ${version.join('.')}`);
   console.log(`🤖 رقم البوت: ${BOT_NUMBER}`);
-  console.log(`🔑 مفتاح API: ${OPENAI_API_KEY.slice(0, 20)}...`);
+  console.log(`🔑 مفتاح API: تم تحميله بنجاح من ملف .env (مخفي)`);
 
   const sock = makeWASocket({
     version, logger,
